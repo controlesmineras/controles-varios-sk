@@ -1,34 +1,27 @@
 const APP = Object.freeze({
-  sheets: {
-    INDUGEL: ["ID", "SERIAL", "FECHA DE FABRICACIÓN", "FECHA DE VENCIMIENTO", "FECHA DE INGRESO", "FECHA DEL MOVIMIENTO", "UBICACIÓN", "FECHA DE REGISTRO", "USUARIO"],
-    ANFO: ["ID", "SERIAL", "FECHA DE FABRICACIÓN", "FECHA DE VENCIMIENTO", "FECHA DE INGRESO", "FECHA DEL MOVIMIENTO", "UBICACIÓN", "FECHA DE REGISTRO", "USUARIO"],
-    "MECHA DE SEGURIDAD": ["ID", "CAJA No.", "CANTIDAD", "CONTENIDO", "FECHA DE FABRICACIÓN", "FECHA DE VENCIMIENTO", "FECHA DE INGRESO", "FECHA DEL MOVIMIENTO", "UBICACIÓN", "BOBINA 1 INICIAL 1", "BOBINA 1 FINAL 1", "BOBINA 1 INICIAL 2", "BOBINA 1 FINAL 2", "BOBINA 2 INICIAL 1", "BOBINA 2 FINAL 1", "BOBINA 2 INICIAL 2", "BOBINA 2 FINAL 2", "FECHA DE REGISTRO", "USUARIO"],
-    DETONADORES: ["ID", "CAJA No.", "CONTENIDO", "LOTE DE PRODUCCIÓN", "FECHA DE PRODUCCIÓN", "FECHA DE VENCIMIENTO", "FECHA DE INGRESO", "FECHA DEL MOVIMIENTO", "UBICACIÓN", "FECHA DE REGISTRO", "USUARIO"],
-    "CONTROL DE SELLOS": ["ID", "FECHA", "SELLO DE SEGURIDAD INDUGEL", "SELLO DE SEGURIDAD ANFO", "FECHA DE REGISTRO", "USUARIO"],
-    USUARIOS: ["USUARIO", "NOMBRE", "SALT", "HASH", "ROL", "ACTIVO", "CREADO"],
-    SESIONES: ["TOKEN HASH", "USUARIO", "VENCE"]
-  },
-  locations: ["Polvorín superficie", "Polvorín interior de mina"],
-  sessionHours: 12
+  fileName: "control-explosivos-sk-central.json",
+  property: "CONTROL_EXPLOSIVOS_FILE_ID",
+  sessionHours: 12,
+  locations: ["Polvorín superficie", "Polvorín interior de mina"]
 });
+
+function configurarSistema() {
+  const db = load_();
+  save_(db);
+  Logger.log("Base privada creada: " + DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty(APP.property)).getUrl());
+}
 
 function doGet() { return json_({ ok: true, servicio: "CONTROL EXPLOSIVOS SK" }); }
 
-function configurarSistema() {
-  ensureSheets_();
-  SpreadsheetApp.getActive().toast("Las hojas quedaron creadas correctamente.", "CONTROL EXPLOSIVOS SK", 5);
-}
-
 function doPost(e) {
   try {
-    ensureSheets_();
     const body = JSON.parse((e && e.parameter && e.parameter.payload) || "{}");
     const action = String(body.action || "");
     if (action === "status") return json_(status_(body.token));
     if (action === "bootstrap") return json_(bootstrap_(body));
     if (action === "login") return json_(login_(body));
     const user = requireSession_(body.token);
-    if (action === "list") return json_({ ok: true, records: list_() });
+    if (action === "list") return json_({ ok: true, records: publicRecords_(load_()) });
     if (action === "create") return json_(create_(body.record || {}, user.usuario));
     if (action === "usersList") return json_(usersList_(user));
     if (action === "userCreate") return json_(userCreate_(body, user));
@@ -38,140 +31,96 @@ function doPost(e) {
   } catch (error) { return json_({ ok: false, error: error.message || String(error) }); }
 }
 
+function emptyDb_() {
+  return { version: 1, records: { INDUGEL: [], ANFO: [], "MECHA DE SEGURIDAD": [], DETONADORES: [], SELLOS: [] }, users: [], sessions: [] };
+}
+
+function load_() {
+  const props = PropertiesService.getScriptProperties();
+  let id = props.getProperty(APP.property);
+  if (!id) {
+    const file = DriveApp.createFile(APP.fileName, JSON.stringify(emptyDb_()), MimeType.PLAIN_TEXT);
+    id = file.getId(); props.setProperty(APP.property, id);
+  }
+  try {
+    const db = JSON.parse(DriveApp.getFileById(id).getBlob().getDataAsString("UTF-8"));
+    db.records = db.records || emptyDb_().records; db.users = db.users || []; db.sessions = db.sessions || [];
+    return db;
+  } catch (_) { throw new Error("No se pudo leer la base privada. Verifica que el archivo no haya sido eliminado."); }
+}
+
+function save_(db) {
+  const id = PropertiesService.getScriptProperties().getProperty(APP.property);
+  if (!id) throw new Error("La base aún no ha sido configurada.");
+  DriveApp.getFileById(id).setContent(JSON.stringify(db));
+}
+
 function status_(token) {
-  const needsBootstrap = dataRows_("USUARIOS").length === 0;
-  let current = null;
-  try { current = requireSession_(token); } catch (_) {}
-  return { ok: true, needsBootstrap: needsBootstrap, authenticated: Boolean(current), usuario: current };
+  const db = load_(); let current = null;
+  try { current = sessionFromDb_(db, token); } catch (_) {}
+  return { ok: true, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
 }
 
 function bootstrap_(body) {
-  const lock = LockService.getScriptLock(); lock.waitLock(30000);
-  try {
-    if (dataRows_("USUARIOS").length) throw new Error("El administrador inicial ya fue creado.");
-    const usuario = required_(body.usuario, "usuario").toLowerCase();
-    const nombre = required_(body.nombre, "nombre");
-    const password = password_(body.password);
-    const salt = token_();
-    sheet_("USUARIOS").appendRow([usuario, nombre, salt, hash_(salt + password), "ADMINISTRADOR", true, new Date()]);
-    return session_(usuario);
-  } finally { lock.releaseLock(); }
+  return locked_(function(db) {
+    if (db.users.length) throw new Error("El administrador inicial ya fue creado.");
+    const usuario = required_(body.usuario,"usuario").toLowerCase(); const nombre=required_(body.nombre,"nombre"); const password=password_(body.password); const salt=token_();
+    db.users.push({ usuario:usuario,nombre:nombre,salt:salt,hash:hash_(salt+password),rol:"ADMINISTRADOR",activo:true,creado:iso_() });
+    const result = newSession_(db,usuario); return result;
+  });
 }
 
 function login_(body) {
-  const usuario = required_(body.usuario, "usuario").toLowerCase();
-  const password = required_(body.password, "contraseña");
-  const row = dataRows_("USUARIOS").find(r => String(r[0]).toLowerCase() === usuario);
-  if (!row || row[5] !== true || hash_(String(row[2]) + password) !== String(row[3])) throw new Error("Usuario o contraseña incorrectos.");
-  return session_(usuario);
+  return locked_(function(db) {
+    const usuario=required_(body.usuario,"usuario").toLowerCase(); const password=required_(body.password,"contraseña");
+    const account=db.users.find(u=>u.usuario===usuario);
+    if(!account||!account.activo||account.hash!==hash_(account.salt+password))throw new Error("Usuario o contraseña incorrectos.");
+    return newSession_(db,usuario);
+  });
 }
 
-function session_(usuario) {
-  const account = dataRows_("USUARIOS").find(r => String(r[0]).toLowerCase() === String(usuario).toLowerCase());
-  const token = token_() + token_();
-  const expires = new Date(Date.now() + APP.sessionHours * 3600000);
-  sheet_("SESIONES").appendRow([hash_(token), usuario, expires]);
-  return { ok: true, token: token, usuario: { usuario: usuario, nombre: String(account[1]), rol: String(account[4]) }, vence: expires.toISOString() };
+function newSession_(db,usuario) {
+  const account=db.users.find(u=>u.usuario===usuario); const token=token_()+token_(); const vence=new Date(Date.now()+APP.sessionHours*3600000).toISOString();
+  db.sessions=db.sessions.filter(s=>new Date(s.vence).getTime()>Date.now()); db.sessions.push({tokenHash:hash_(token),usuario:usuario,vence:vence});
+  return {ok:true,token:token,usuario:{usuario:usuario,nombre:account.nombre,rol:account.rol},vence:vence};
 }
 
-function requireSession_(token) {
-  if (!token) throw new Error("Debes iniciar sesión.");
-  const key = hash_(String(token));
-  const now = Date.now();
-  const row = dataRows_("SESIONES").find(r => String(r[0]) === key && new Date(r[2]).getTime() > now);
-  if (!row) throw new Error("La sesión venció. Inicia sesión nuevamente.");
-  const account = dataRows_("USUARIOS").find(r => String(r[0]).toLowerCase() === String(row[1]).toLowerCase() && r[5] === true);
-  if (!account) throw new Error("El usuario no está activo.");
-  return { usuario: String(account[0]), nombre: String(account[1]), rol: String(account[4]) };
+function requireSession_(token) { return sessionFromDb_(load_(),token); }
+function sessionFromDb_(db,token) {
+  if(!token)throw new Error("Debes iniciar sesión."); const key=hash_(String(token)); const session=db.sessions.find(s=>s.tokenHash===key&&new Date(s.vence).getTime()>Date.now());
+  if(!session)throw new Error("La sesión venció. Inicia sesión nuevamente."); const account=db.users.find(u=>u.usuario===session.usuario&&u.activo);
+  if(!account)throw new Error("El usuario no está activo."); return {usuario:account.usuario,nombre:account.nombre,rol:account.rol};
 }
 
-function requireAdmin_(user) { if (!user || user.rol !== "ADMINISTRADOR") throw new Error("Esta operación requiere rol administrador."); }
-
-function usersList_(user) {
-  requireAdmin_(user);
-  return { ok: true, users: dataRows_("USUARIOS").map(r => ({ usuario: String(r[0]), nombre: String(r[1]), rol: String(r[4]), activo: r[5] === true, creado: r[6] })) };
+function create_(r,usuario) {
+  return locked_(function(db) {
+    const type=required_(r.tipo,"tipo"); if(!db.records[type])throw new Error("Tipo de registro no reconocido.");
+    const base={id:Utilities.getUuid(),fechaRegistro:iso_(),usuario:usuario}; let item;
+    if(type==="INDUGEL"||type==="ANFO") { const serial=number_(r.serial,"serial"); unique_(db.records[type],"serial",serial); item=Object.assign(base,{serial:serial,fechaFabricacion:required_(r.fechaFabricacion,"fecha de fabricación"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento")},common_(r)); }
+    else if(type==="DETONADORES") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); item=Object.assign(base,{cajaNumero:caja,contenido:required_(r.contenido,"contenido"),loteProduccion:required_(r.loteProduccion,"lote"),fechaProduccion:required_(r.fechaProduccion,"fecha de producción"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento")},common_(r)); }
+    else if(type==="MECHA DE SEGURIDAD") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); const ranges={bobina1Inicial1:number_(r.bobina1Inicial1,"serial"),bobina1Final1:number_(r.bobina1Final1,"serial"),bobina1Inicial2:optionalNumber_(r.bobina1Inicial2),bobina1Final2:optionalNumber_(r.bobina1Final2),bobina2Inicial1:number_(r.bobina2Inicial1,"serial"),bobina2Final1:number_(r.bobina2Final1,"serial"),bobina2Inicial2:optionalNumber_(r.bobina2Inicial2),bobina2Final2:optionalNumber_(r.bobina2Final2)}; range_(ranges.bobina1Inicial1,ranges.bobina1Final1);rangeOptional_(ranges.bobina1Inicial2,ranges.bobina1Final2);range_(ranges.bobina2Inicial1,ranges.bobina2Final1);rangeOptional_(ranges.bobina2Inicial2,ranges.bobina2Final2); item=Object.assign(base,{cajaNumero:caja,cantidad:number_(r.cantidad,"cantidad"),contenido:required_(r.contenido,"contenido"),fechaFabricacion:required_(r.fechaFabricacion,"fecha de fabricación"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento")},common_(r),ranges); }
+    else { item=Object.assign(base,{fecha:required_(r.fecha,"fecha"),selloIndugel:number_(r.selloIndugel,"sello Indugel"),selloAnfo:number_(r.selloAnfo,"sello Anfo")}); }
+    db.records[type].unshift(item); return {ok:true,id:item.id};
+  });
 }
 
-function userCreate_(body, admin) {
-  requireAdmin_(admin);
-  const lock = LockService.getScriptLock(); lock.waitLock(30000);
-  try {
-    const usuario = required_(body.usuario, "usuario").toLowerCase();
-    if (dataRows_("USUARIOS").some(r => String(r[0]).toLowerCase() === usuario)) throw new Error("Ese usuario ya existe.");
-    const nombre = required_(body.nombre, "nombre"); const password = password_(body.password);
-    const rol = String(body.rol || "OPERADOR").toUpperCase();
-    if (["ADMINISTRADOR","OPERADOR"].indexOf(rol) < 0) throw new Error("Rol no válido.");
-    const salt = token_(); sheet_("USUARIOS").appendRow([usuario,nombre,salt,hash_(salt+password),rol,true,new Date()]);
-    return { ok: true };
-  } finally { lock.releaseLock(); }
-}
+function publicRecords_(db){return {INDUGEL:db.records.INDUGEL.slice(0,500),ANFO:db.records.ANFO.slice(0,500),"MECHA DE SEGURIDAD":db.records["MECHA DE SEGURIDAD"].slice(0,500),DETONADORES:db.records.DETONADORES.slice(0,500),SELLOS:db.records.SELLOS.slice(0,500)};}
+function requireAdmin_(u){if(!u||u.rol!=="ADMINISTRADOR")throw new Error("Esta operación requiere rol administrador.");}
+function usersList_(u){requireAdmin_(u);return {ok:true,users:load_().users.map(x=>({usuario:x.usuario,nombre:x.nombre,rol:x.rol,activo:x.activo,creado:x.creado}))};}
+function userCreate_(b,a){requireAdmin_(a);return locked_(db=>{const usuario=required_(b.usuario,"usuario").toLowerCase();if(db.users.some(u=>u.usuario===usuario))throw new Error("Ese usuario ya existe.");const rol=String(b.rol||"OPERADOR").toUpperCase();if(["ADMINISTRADOR","OPERADOR"].indexOf(rol)<0)throw new Error("Rol no válido.");const salt=token_();db.users.push({usuario:usuario,nombre:required_(b.nombre,"nombre"),salt:salt,hash:hash_(salt+password_(b.password)),rol:rol,activo:true,creado:iso_()});return {ok:true};});}
+function userResetPassword_(b,a){requireAdmin_(a);return locked_(db=>{const u=db.users.find(x=>x.usuario===required_(b.usuario,"usuario").toLowerCase());if(!u)throw new Error("Usuario no encontrado.");u.salt=token_();u.hash=hash_(u.salt+password_(b.password));return {ok:true};});}
+function userSetActive_(b,a){requireAdmin_(a);return locked_(db=>{const usuario=required_(b.usuario,"usuario").toLowerCase();if(usuario===a.usuario&&b.activo===false)throw new Error("No puedes desactivar tu propio acceso.");const u=db.users.find(x=>x.usuario===usuario);if(!u)throw new Error("Usuario no encontrado.");u.activo=b.activo===true;return {ok:true};});}
 
-function userResetPassword_(body, admin) {
-  requireAdmin_(admin); const usuario = required_(body.usuario,"usuario").toLowerCase(); const password = password_(body.password);
-  const sh=sheet_("USUARIOS"); const rows=dataRows_("USUARIOS"); const index=rows.findIndex(r=>String(r[0]).toLowerCase()===usuario);
-  if(index<0)throw new Error("Usuario no encontrado."); const salt=token_(); sh.getRange(index+2,3,1,2).setValues([[salt,hash_(salt+password)]]); return {ok:true};
-}
-
-function userSetActive_(body, admin) {
-  requireAdmin_(admin); const usuario=required_(body.usuario,"usuario").toLowerCase();
-  if(usuario===admin.usuario && body.activo===false)throw new Error("No puedes desactivar tu propio acceso.");
-  const sh=sheet_("USUARIOS"); const rows=dataRows_("USUARIOS"); const index=rows.findIndex(r=>String(r[0]).toLowerCase()===usuario);
-  if(index<0)throw new Error("Usuario no encontrado."); sh.getRange(index+2,6).setValue(body.activo===true); return {ok:true};
-}
-
-function list_() {
-  return {
-    INDUGEL: objects_("INDUGEL"), ANFO: objects_("ANFO"),
-    "MECHA DE SEGURIDAD": objects_("MECHA DE SEGURIDAD"),
-    DETONADORES: objects_("DETONADORES"), SELLOS: objects_("CONTROL DE SELLOS")
-  };
-}
-
-function create_(r, user) {
-  const type = required_(r.tipo, "tipo");
-  const lock = LockService.getScriptLock(); lock.waitLock(30000);
-  try {
-    const id = Utilities.getUuid(); const stamp = new Date(); let row; let target;
-    if (type === "INDUGEL" || type === "ANFO") {
-      target = type; const serial = number_(r.serial, "serial"); unique_(target, 1, serial);
-      row = [id, serial, required_(r.fechaFabricacion, "fecha de fabricación"), required_(r.fechaVencimiento, "fecha de vencimiento")].concat(common_(r), [stamp, user]);
-    } else if (type === "DETONADORES") {
-      target = type; const caja = required_(r.cajaNumero, "caja"); unique_(target, 1, caja);
-      row = [id, caja, required_(r.contenido, "contenido"), required_(r.loteProduccion, "lote"), required_(r.fechaProduccion, "fecha de producción"), required_(r.fechaVencimiento, "fecha de vencimiento")].concat(common_(r), [stamp, user]);
-    } else if (type === "MECHA DE SEGURIDAD") {
-      target = type; const caja = required_(r.cajaNumero, "caja"); unique_(target, 1, caja);
-      const ranges = [number_(r.bobina1Inicial1,"bobina 1 inicial 1"), number_(r.bobina1Final1,"bobina 1 final 1"), optionalNumber_(r.bobina1Inicial2), optionalNumber_(r.bobina1Final2), number_(r.bobina2Inicial1,"bobina 2 inicial 1"), number_(r.bobina2Final1,"bobina 2 final 1"), optionalNumber_(r.bobina2Inicial2), optionalNumber_(r.bobina2Final2)];
-      range_(ranges[0], ranges[1]); rangeOptional_(ranges[2], ranges[3]); range_(ranges[4], ranges[5]); rangeOptional_(ranges[6], ranges[7]);
-      row = [id, caja, number_(r.cantidad,"cantidad"), required_(r.contenido,"contenido"), required_(r.fechaFabricacion,"fecha de fabricación"), required_(r.fechaVencimiento,"fecha de vencimiento")].concat(common_(r), ranges, [stamp, user]);
-    } else if (type === "SELLOS") {
-      target = "CONTROL DE SELLOS";
-      row = [id, required_(r.fecha,"fecha"), number_(r.selloIndugel,"sello Indugel"), number_(r.selloAnfo,"sello Anfo"), stamp, user];
-    } else throw new Error("Tipo de registro no reconocido.");
-    sheet_(target).appendRow(row); return { ok: true, id: id };
-  } finally { lock.releaseLock(); }
-}
-
-function common_(r) {
-  const location = required_(r.ubicacion, "ubicación");
-  if (APP.locations.indexOf(location) < 0) throw new Error("Ubicación no válida.");
-  return [required_(r.fechaIngreso,"fecha de ingreso"), required_(r.fechaMovimiento,"fecha del movimiento"), location];
-}
-function objects_(name) {
-  const sh = sheet_(name); const values = sh.getDataRange().getDisplayValues(); if (values.length < 2) return [];
-  const keys = name === "CONTROL DE SELLOS" ? ["id","fecha","selloIndugel","selloAnfo","fechaRegistro","usuario"] : values[0].map(key_);
-  return values.slice(1).reverse().slice(0, 500).map(row => Object.fromEntries(keys.map((k,i) => [k,row[i]])));
-}
-function key_(h) { const map={"ID":"id","SERIAL":"serial","CAJA No.":"cajaNumero","CONTENIDO":"contenido","LOTE DE PRODUCCIÓN":"loteProduccion","UBICACIÓN":"ubicacion"}; return map[h] || h.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g,"").replace(/[^a-z0-9]+(.)/g,(_,c)=>c.toUpperCase()); }
-function ensureSheets_() { Object.keys(APP.sheets).forEach(name => { let sh=SpreadsheetApp.getActive().getSheetByName(name); if(!sh){sh=SpreadsheetApp.getActive().insertSheet(name); sh.getRange(1,1,1,APP.sheets[name].length).setValues([APP.sheets[name]]).setFontWeight("bold"); sh.setFrozenRows(1);} }); }
-function sheet_(name) { return SpreadsheetApp.getActive().getSheetByName(name); }
-function dataRows_(name) { const s=sheet_(name); return s.getLastRow()<2?[]:s.getRange(2,1,s.getLastRow()-1,s.getLastColumn()).getValues(); }
-function required_(v,label){const x=String(v==null?"":v).trim();if(!x)throw new Error("El campo "+label+" es obligatorio.");return x;}
-function number_(v,label){const x=Number(v);if(!Number.isFinite(x))throw new Error("El campo "+label+" debe ser numérico.");return x;}
-function optionalNumber_(v){return v===""||v==null?"":Number(v);}
+function locked_(fn){const lock=LockService.getScriptLock();lock.waitLock(30000);try{const db=load_();const result=fn(db);save_(db);return result;}finally{lock.releaseLock();}}
+function common_(r){const ubicacion=required_(r.ubicacion,"ubicación");if(APP.locations.indexOf(ubicacion)<0)throw new Error("Ubicación no válida.");return {fechaIngreso:required_(r.fechaIngreso,"fecha de ingreso"),fechaMovimiento:required_(r.fechaMovimiento,"fecha del movimiento"),ubicacion:ubicacion};}
+function required_(v,l){const x=String(v==null?"":v).trim();if(!x)throw new Error("El campo "+l+" es obligatorio.");return x;}
+function number_(v,l){const x=Number(v);if(!Number.isFinite(x))throw new Error("El campo "+l+" debe ser numérico.");return x;}
+function optionalNumber_(v){return v===""||v==null?null:Number(v);}
 function password_(v){const p=required_(v,"contraseña");if(p.length<8)throw new Error("La contraseña debe tener al menos 8 caracteres.");return p;}
 function range_(a,b){if(b<a)throw new Error("Un serial final no puede ser menor que el inicial.");}
-function rangeOptional_(a,b){if(a===""&&b==="")return;if(a===""||b==="")throw new Error("El intervalo opcional debe tener serial inicial y final.");range_(a,b);}
-function unique_(name,index,value){if(dataRows_(name).some(r=>String(r[index])===String(value)))throw new Error("Ya existe un registro con ese serial o número de caja.");}
+function rangeOptional_(a,b){if(a===null&&b===null)return;if(a===null||b===null)throw new Error("El intervalo opcional debe tener serial inicial y final.");range_(a,b);}
+function unique_(list,key,value){if(list.some(x=>String(x[key])===String(value)))throw new Error("Ya existe un registro con ese serial o número de caja.");}
 function token_(){return Utilities.getUuid().replace(/-/g,"");}
 function hash_(text){return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,text,Utilities.Charset.UTF_8).map(b=>(b+256)%256).map(b=>("0"+b.toString(16)).slice(-2)).join("");}
-function json_(value){return ContentService.createTextOutput(JSON.stringify(value)).setMimeType(ContentService.MimeType.JSON);}
+function iso_(){return new Date().toISOString();}
+function json_(v){return ContentService.createTextOutput(JSON.stringify(v)).setMimeType(ContentService.MimeType.JSON);}
