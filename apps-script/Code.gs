@@ -62,7 +62,7 @@ function save_(db) {
 function status_(token) {
   const db = load_(); let current = null;
   try { current = sessionFromDb_(db, token); } catch (_) {}
-  return { ok: true, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
+  return { ok: true, apiVersion: 2, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
 }
 
 function bootstrap_(body) {
