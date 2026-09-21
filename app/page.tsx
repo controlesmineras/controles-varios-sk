@@ -5,6 +5,7 @@ import { Archive, Bomb, Cable, ChevronRight, Loader2, LogOut, MapPin, Search, Sh
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RecordDialog } from "@/components/record-dialog";
+import { AccessDialog } from "@/components/access-dialog";
 import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout } from "@/lib/backend";
 
 const modules = [
@@ -16,6 +17,7 @@ const modules = [
 
 export default function Home() {
   const [authenticated, setAuthenticated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<{ usuario: string; nombre: string; rol: string } | null>(null);
   const [needsBootstrap, setNeedsBootstrap] = useState(false);
   const [checking, setChecking] = useState(true);
   const [selected, setSelected] = useState("INDUGEL");
@@ -31,6 +33,7 @@ export default function Home() {
     getStatus().then((status) => {
       setNeedsBootstrap(Boolean(status.needsBootstrap));
       setAuthenticated(Boolean(status.authenticated));
+      setCurrentUser(status.usuario || null);
     }).finally(() => setChecking(false));
   }, []);
   useEffect(() => { if (authenticated) void loadRecords(); }, [authenticated, loadRecords]);
@@ -61,7 +64,7 @@ export default function Home() {
 
   if (checking) return <div className="grid min-h-screen place-items-center bg-slate-50"><Loader2 className="h-7 w-7 animate-spin text-slate-500" /></div>;
   if (!backendConfigured()) return <ConnectionPending />;
-  if (!authenticated) return <AccessForm bootstrap={needsBootstrap} onSuccess={() => { setAuthenticated(true); setNeedsBootstrap(false); }} />;
+  if (!authenticated) return <AccessForm bootstrap={needsBootstrap} onSuccess={(user) => { setAuthenticated(true); setNeedsBootstrap(false); setCurrentUser(user); }} />;
 
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950">
@@ -76,7 +79,7 @@ export default function Home() {
               <p className="hidden text-xs text-slate-300 sm:block">Control de inventario y ubicación</p>
             </div>
           </div>
-          <div className="flex items-center gap-2"><RecordDialog initialType={selected} onSaved={loadRecords} /><Button variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => { logout(); setAuthenticated(false); }}><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Cerrar sesión</span></Button></div>
+          <div className="flex items-center gap-2">{currentUser?.rol === "ADMINISTRADOR" && <AccessDialog/>}<RecordDialog initialType={selected} onSaved={loadRecords} /><Button variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => { logout(); setAuthenticated(false); setCurrentUser(null); }}><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Cerrar sesión</span></Button></div>
         </div>
       </header>
 
@@ -139,16 +142,15 @@ function ConnectionPending() {
   return <main className="grid min-h-screen place-items-center bg-slate-50 px-5"><section className="max-w-lg rounded-2xl border bg-white p-8 text-center shadow-sm"><ShieldCheck className="mx-auto h-11 w-11 text-[#0d2c3e]" /><h1 className="mt-4 text-2xl font-semibold">Servidor empresarial pendiente</h1><p className="mt-2 text-slate-600">La interfaz ya está preparada. Falta agregar en <b>public/config.js</b> la URL de Google Apps Script para habilitar el acceso y los registros.</p></section></main>;
 }
 
-function AccessForm({ bootstrap, onSuccess }: { bootstrap: boolean; onSuccess: () => void }) {
+function AccessForm({ bootstrap, onSuccess }: { bootstrap: boolean; onSuccess: (user: { usuario: string; nombre: string; rol: string }) => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError("");
     const data = Object.fromEntries(new FormData(event.currentTarget).entries());
     try {
-      if (bootstrap) await createInitialAdmin(String(data.usuario), String(data.nombre), String(data.password));
-      else await login(String(data.usuario), String(data.password));
-      onSuccess();
+      const result = bootstrap ? await createInitialAdmin(String(data.usuario), String(data.nombre), String(data.password)) : await login(String(data.usuario), String(data.password));
+      onSuccess(result.usuario);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo iniciar sesión."); }
     finally { setSaving(false); }
   }

@@ -29,16 +29,20 @@ function doPost(e) {
     if (action === "login") return json_(login_(body));
     const user = requireSession_(body.token);
     if (action === "list") return json_({ ok: true, records: list_() });
-    if (action === "create") return json_(create_(body.record || {}, user));
+    if (action === "create") return json_(create_(body.record || {}, user.usuario));
+    if (action === "usersList") return json_(usersList_(user));
+    if (action === "userCreate") return json_(userCreate_(body, user));
+    if (action === "userResetPassword") return json_(userResetPassword_(body, user));
+    if (action === "userSetActive") return json_(userSetActive_(body, user));
     throw new Error("Operación no reconocida.");
   } catch (error) { return json_({ ok: false, error: error.message || String(error) }); }
 }
 
 function status_(token) {
   const needsBootstrap = dataRows_("USUARIOS").length === 0;
-  let authenticated = false;
-  try { authenticated = Boolean(requireSession_(token)); } catch (_) {}
-  return { ok: true, needsBootstrap: needsBootstrap, authenticated: authenticated };
+  let current = null;
+  try { current = requireSession_(token); } catch (_) {}
+  return { ok: true, needsBootstrap: needsBootstrap, authenticated: Boolean(current), usuario: current };
 }
 
 function bootstrap_(body) {
@@ -63,10 +67,11 @@ function login_(body) {
 }
 
 function session_(usuario) {
+  const account = dataRows_("USUARIOS").find(r => String(r[0]).toLowerCase() === String(usuario).toLowerCase());
   const token = token_() + token_();
   const expires = new Date(Date.now() + APP.sessionHours * 3600000);
   sheet_("SESIONES").appendRow([hash_(token), usuario, expires]);
-  return { ok: true, token: token, usuario: usuario, vence: expires.toISOString() };
+  return { ok: true, token: token, usuario: { usuario: usuario, nombre: String(account[1]), rol: String(account[4]) }, vence: expires.toISOString() };
 }
 
 function requireSession_(token) {
@@ -75,7 +80,43 @@ function requireSession_(token) {
   const now = Date.now();
   const row = dataRows_("SESIONES").find(r => String(r[0]) === key && new Date(r[2]).getTime() > now);
   if (!row) throw new Error("La sesión venció. Inicia sesión nuevamente.");
-  return String(row[1]);
+  const account = dataRows_("USUARIOS").find(r => String(r[0]).toLowerCase() === String(row[1]).toLowerCase() && r[5] === true);
+  if (!account) throw new Error("El usuario no está activo.");
+  return { usuario: String(account[0]), nombre: String(account[1]), rol: String(account[4]) };
+}
+
+function requireAdmin_(user) { if (!user || user.rol !== "ADMINISTRADOR") throw new Error("Esta operación requiere rol administrador."); }
+
+function usersList_(user) {
+  requireAdmin_(user);
+  return { ok: true, users: dataRows_("USUARIOS").map(r => ({ usuario: String(r[0]), nombre: String(r[1]), rol: String(r[4]), activo: r[5] === true, creado: r[6] })) };
+}
+
+function userCreate_(body, admin) {
+  requireAdmin_(admin);
+  const lock = LockService.getScriptLock(); lock.waitLock(30000);
+  try {
+    const usuario = required_(body.usuario, "usuario").toLowerCase();
+    if (dataRows_("USUARIOS").some(r => String(r[0]).toLowerCase() === usuario)) throw new Error("Ese usuario ya existe.");
+    const nombre = required_(body.nombre, "nombre"); const password = password_(body.password);
+    const rol = String(body.rol || "OPERADOR").toUpperCase();
+    if (["ADMINISTRADOR","OPERADOR"].indexOf(rol) < 0) throw new Error("Rol no válido.");
+    const salt = token_(); sheet_("USUARIOS").appendRow([usuario,nombre,salt,hash_(salt+password),rol,true,new Date()]);
+    return { ok: true };
+  } finally { lock.releaseLock(); }
+}
+
+function userResetPassword_(body, admin) {
+  requireAdmin_(admin); const usuario = required_(body.usuario,"usuario").toLowerCase(); const password = password_(body.password);
+  const sh=sheet_("USUARIOS"); const rows=dataRows_("USUARIOS"); const index=rows.findIndex(r=>String(r[0]).toLowerCase()===usuario);
+  if(index<0)throw new Error("Usuario no encontrado."); const salt=token_(); sh.getRange(index+2,3,1,2).setValues([[salt,hash_(salt+password)]]); return {ok:true};
+}
+
+function userSetActive_(body, admin) {
+  requireAdmin_(admin); const usuario=required_(body.usuario,"usuario").toLowerCase();
+  if(usuario===admin.usuario && body.activo===false)throw new Error("No puedes desactivar tu propio acceso.");
+  const sh=sheet_("USUARIOS"); const rows=dataRows_("USUARIOS"); const index=rows.findIndex(r=>String(r[0]).toLowerCase()===usuario);
+  if(index<0)throw new Error("Usuario no encontrado."); sh.getRange(index+2,6).setValue(body.activo===true); return {ok:true};
 }
 
 function list_() {

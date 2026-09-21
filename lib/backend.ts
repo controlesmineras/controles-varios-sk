@@ -37,3 +37,7 @@ export async function createInitialAdmin(usuario: string, nombre: string, passwo
 export function logout() { localStorage.removeItem("control_explosivos_token"); }
 export async function listRecords() { return (await request("list")).records; }
 export async function saveRecord(record: Record<string, unknown>) { return request("create", { record }); }
+export async function listUsers() { return (await request("usersList")).users; }
+export async function createUser(usuario: string, nombre: string, password: string, rol: string) { return request("userCreate", { usuario, nombre, password, rol }); }
+export async function resetUserPassword(usuario: string, password: string) { return request("userResetPassword", { usuario, password }); }
+export async function setUserActive(usuario: string, activo: boolean) { return request("userSetActive", { usuario, activo }); }
