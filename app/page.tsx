@@ -88,7 +88,6 @@ export default function Home() {
           <div>
             <p className="mb-1 text-sm font-medium uppercase tracking-[0.14em] text-slate-500">Inventario actual</p>
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">EXPLOSIVOS Y ACCESORIOS</h1>
-            <div className="mt-4"><RecordDialog initialType={selected} onSaved={loadRecords} /></div>
           </div>
           <label className="relative block min-w-64">
             <span className="sr-only">Buscar registros</span>
@@ -99,14 +98,14 @@ export default function Home() {
 
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Clases de inventario">
           {modules.map(({ name, detail, icon: Icon, tone }) => (
-            <button key={name} type="button" onClick={() => setSelected(name)}
-              className={`group rounded-2xl border bg-white p-5 text-left shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected === name ? "border-[#f5b51b] ring-2 ring-[#f5b51b]/20" : "border-slate-200"}`}>
-              <span className={`module-icon module-icon-${tone}`}><Icon className="h-5 w-5" /></span>
-              <span className="mt-5 block text-sm font-semibold leading-tight">{name}</span>
-              <span className="mt-1 flex items-center justify-between text-sm text-slate-500">
-                {detail}<ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" />
-              </span>
-            </button>
+            <div key={name} className={`rounded-2xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected === name ? "border-[#f5b51b] ring-2 ring-[#f5b51b]/20" : "border-slate-200"}`}>
+              <button type="button" onClick={() => setSelected(name)} className="group block w-full text-left">
+                <span className={`module-icon module-icon-${tone}`}><Icon className="h-5 w-5" /></span>
+                <span className="mt-5 block text-sm font-semibold leading-tight">{name}</span>
+                <span className="mt-1 flex items-center justify-between text-sm text-slate-500">{detail}<ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" /></span>
+              </button>
+              <RecordDialog initialType={name} onSaved={loadRecords} triggerLabel={`REGISTRAR ${name === "MECHA DE SEGURIDAD" ? "MECHA" : name}`} triggerClassName="mt-4 h-9 w-full bg-[#0d2c3e] text-xs font-semibold text-white hover:bg-[#16445d]" />
+            </div>
           ))}
         </section>
 
@@ -131,7 +130,8 @@ export default function Home() {
                 <div key={location} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"><span className="text-sm font-medium">{location}</span><span className="text-sm tabular-nums text-slate-500">{Object.values(records).flat().filter((record) => record.ubicacion === location).length}</span></div>
               ))}
             </div>
-            <Button variant="outline" onClick={() => setSelected("SELLOS")} className="mt-5 h-11 w-full border-slate-300"><ShieldCheck className="h-4 w-4" />Control de sellos</Button>
+            <Button variant="outline" onClick={() => setSelected("SELLOS")} className="mt-5 h-11 w-full border-slate-300"><ShieldCheck className="h-4 w-4" />CONTROL DE SELLOS</Button>
+            <RecordDialog initialType="SELLOS" onSaved={loadRecords} triggerLabel="REGISTRAR SELLOS" triggerClassName="mt-3 h-10 w-full bg-[#0d2c3e] text-xs font-semibold text-white hover:bg-[#16445d]" />
           </aside>
         </section>
       </div>

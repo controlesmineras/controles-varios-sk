@@ -31,7 +31,7 @@ function Bobina({ number }: { number: 1 | 2 }) {
   </div></fieldset>;
 }
 
-export function RecordDialog({ initialType = "INDUGEL", onSaved }: { initialType?: string; onSaved?: () => void }) {
+export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, triggerClassName }: { initialType?: string; onSaved?: () => void; triggerLabel?: string; triggerClassName?: string }) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState(initialType);
   const [saving, setSaving] = useState(false);
@@ -49,7 +49,7 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved }: { initialType
   }
 
   return <Dialog open={open} onOpenChange={setOpen}>
-    <DialogTrigger asChild><Button className="shrink-0 bg-white text-[#0d2c3e] hover:bg-slate-100"><Plus className="h-4 w-4" /><span className="hidden sm:inline">Nuevo registro</span><span className="sm:hidden">Nuevo</span></Button></DialogTrigger>
+    <DialogTrigger asChild><Button className={triggerClassName || "shrink-0 bg-white text-[#0d2c3e] hover:bg-slate-100"}><Plus className="h-4 w-4" />{triggerLabel || "NUEVO REGISTRO"}</Button></DialogTrigger>
     <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
       <DialogHeader><DialogTitle>NUEVO REGISTRO</DialogTitle></DialogHeader>
       <form onSubmit={submit} className="space-y-5">
