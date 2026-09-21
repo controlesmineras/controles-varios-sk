@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { RecordDialog } from "@/components/record-dialog";
 import { AccessDialog } from "@/components/access-dialog";
 import { MovementDialog } from "@/components/movement-dialog";
+import { VerificationDialog } from "@/components/verification-dialog";
 import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout } from "@/lib/backend";
 
 const modules = [
@@ -23,6 +24,9 @@ export default function Home() {
   const [checking, setChecking] = useState(true);
   const [selected, setSelected] = useState("INDUGEL");
   const [query, setQuery] = useState("");
+  const [dateFilter,setDateFilter]=useState("");
+  const [verificationFilter,setVerificationFilter]=useState("TODOS");
+  const [verificationSignal,setVerificationSignal]=useState(0);
   const [records, setRecords] = useState<Record<string, Array<Record<string, unknown>>>>({});
   const loadRecords = useCallback(async () => {
     try {
@@ -51,16 +55,16 @@ export default function Home() {
       execute: () => ({
         porTipo: Object.fromEntries(Object.entries(records).map(([key, value]) => [key, value.length])),
         porUbicacion: {
-          superficie: Object.values(records).flat().filter((record) => record.ubicacion === "Polvorín superficie").length,
-          interiorMina: Object.values(records).flat().filter((record) => record.ubicacion === "Polvorín interior de mina").length,
+          superficie: Object.values(records).flat().filter((record) => record.ubicacion === "Polvorín superficie"&&record.verificado!==false).length,
+          interiorMina: Object.values(records).flat().filter((record) => record.ubicacion === "Polvorín interior de mina"&&record.verificado!==false).length,
         },
       }),
     }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, [records]);
   const selectedRecords = useMemo(
-    () => (records[selected] || []).filter((record) => JSON.stringify(record).toLowerCase().includes(query.toLowerCase())),
-    [records, selected, query],
+    () => (records[selected] || []).filter((record) => JSON.stringify(record).toLowerCase().includes(query.toLowerCase())).filter(record=>!dateFilter||String(record.fechaIngreso||record.fecha||"").slice(0,10)===dateFilter).filter(record=>verificationFilter==="TODOS"||(verificationFilter==="VERIFICADOS"?record.verificado!==false:record.verificado===false)),
+    [records, selected, query,dateFilter,verificationFilter],
   );
 
   if (checking) return <div className="grid min-h-screen place-items-center bg-slate-50"><Loader2 className="h-7 w-7 animate-spin text-slate-500" /></div>;
@@ -93,13 +97,13 @@ export default function Home() {
           <div>
             <p className="mb-1 text-sm font-medium uppercase tracking-[0.14em] text-slate-500">Inventario actual</p>
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">EXPLOSIVOS Y ACCESORIOS</h1>
-            <div className="mt-4 flex flex-wrap gap-3"><RecordDialog initialType="INDUGEL" onSaved={loadRecords} triggerLabel="REGISTRAR INGRESOS" triggerClassName="h-12 bg-[#0d2c3e] px-5 font-semibold text-white hover:bg-[#16445d]"/><MovementDialog records={records} onSaved={loadRecords}/></div>
+            <div className="mt-4 flex flex-wrap gap-3"><RecordDialog initialType="INDUGEL" onSaved={async result=>{await loadRecords();if(result?.loteIngreso)setVerificationSignal(value=>value+1);}} triggerLabel="REGISTRAR INGRESOS" triggerClassName="h-12 bg-[#0d2c3e] px-5 font-semibold text-white hover:bg-[#16445d]"/><MovementDialog records={records} onSaved={loadRecords}/><VerificationDialog records={records} onSaved={loadRecords} autoOpenSignal={verificationSignal}/></div>
           </div>
-          <label className="relative block min-w-64">
+          <div className="grid min-w-64 gap-2"><label className="relative block">
             <span className="sr-only">Buscar registros</span>
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input value={query} onChange={(event) => setQuery(event.target.value)} className="h-11 bg-white pl-10" placeholder="Buscar serial, caja o lote" />
-          </label>
+          </label><div className="grid grid-cols-2 gap-2"><Input type="date" value={dateFilter} onChange={e=>setDateFilter(e.target.value)} aria-label="Filtrar por fecha de ingreso"/><select value={verificationFilter} onChange={e=>setVerificationFilter(e.target.value)} className="h-10 rounded-md border bg-white px-2 text-sm"><option value="TODOS">TODOS</option><option value="VERIFICADOS">VERIFICADOS</option><option value="PENDIENTES">PENDIENTES</option></select></div></div>
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Clases de inventario">
@@ -122,7 +126,7 @@ export default function Home() {
             </div>
             {selectedRecords.length === 0 ? <div className="grid min-h-56 place-items-center px-6 py-10 text-center">
               <div><Archive className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-3 font-medium">Aún no hay registros en {selected}</p><p className="mt-1 text-sm text-slate-500">El primer ingreso aparecerá aquí con su ubicación actual.</p></div>
-            </div> : <div className="divide-y divide-slate-100">{selectedRecords.map((record) => <article key={String(record.id)} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center"><div><p className="font-semibold">{String(record.serial || record.cajaNumero || `Registro ${record.id}`)}</p><p className="text-sm text-slate-500">{String(record.loteProduccion || record.contenido || "Registro individual")}</p>{selected!=="SELLOS"&&<p className="mt-1 text-xs text-slate-500">Ingreso: {String(record.fechaIngreso||"")} · Fabricación: {String(record.fechaFabricacion||record.fechaProduccion||"")} · Vencimiento: {String(record.fechaVencimiento||"")}</p>}</div>{selected!=="SELLOS"&&<div className="flex items-center gap-2 text-sm text-slate-600 sm:justify-end"><MapPin className="h-4 w-4" />{String(record.ubicacion||"")}</div>}</article>)}</div>}
+            </div> : <div className="divide-y divide-slate-100">{selectedRecords.map((record) => <article key={String(record.id)} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{String(record.serial || record.cajaNumero || `Registro ${record.id}`)}</p>{record.verificado===false&&<span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">PENDIENTE DE VERIFICAR</span>}</div><p className="text-sm text-slate-500">{String(record.loteProduccion || record.contenido || "Registro individual")}</p>{selected!=="SELLOS"&&<p className="mt-1 text-xs text-slate-500">Ingreso: {String(record.fechaIngreso||"")} · Fabricación: {String(record.fechaFabricacion||record.fechaProduccion||"")} · Vencimiento: {String(record.fechaVencimiento||"")}</p>}</div>{selected!=="SELLOS"&&<div className="flex items-center gap-2 text-sm text-slate-600 sm:justify-end"><MapPin className="h-4 w-4" />{String(record.ubicacion||"")}</div>}</article>)}</div>}
           </div>
 
           <aside className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -132,7 +136,7 @@ export default function Home() {
             </div>
             <div className="mt-5 space-y-3">
               {["Polvorín superficie", "Polvorín interior de mina"].map((location) => (
-                <div key={location} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"><span className="text-sm font-medium">{location}</span><span className="text-sm tabular-nums text-slate-500">{Object.values(records).flat().filter((record) => record.ubicacion === location).length}</span></div>
+                <div key={location} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"><span className="text-sm font-medium">{location}</span><span className="text-sm tabular-nums text-slate-500">{Object.values(records).flat().filter((record) => record.ubicacion === location&&record.verificado!==false).length}</span></div>
               ))}
             </div>
           </aside>
