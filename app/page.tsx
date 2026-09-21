@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { Archive, Bomb, Cable, ChevronRight, Loader2, LogOut, MapPin, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Archive, Bomb, Cable, Check, ChevronRight, Loader2, LogOut, MapPin, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RecordDialog } from "@/components/record-dialog";
@@ -9,7 +9,7 @@ import { AccessDialog } from "@/components/access-dialog";
 import { MovementDialog } from "@/components/movement-dialog";
 import { VerificationDialog } from "@/components/verification-dialog";
 import { InstallAppButton } from "@/components/install-app-button";
-import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout } from "@/lib/backend";
+import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout, pendingOperations } from "@/lib/backend";
 
 const modules = [
   { name: "INDUGEL", detail: "Seriales y ubicación", icon: Bomb, tone: "orange" },
@@ -28,11 +28,16 @@ export default function Home() {
   const [dateFilter,setDateFilter]=useState("");
   const [verificationFilter,setVerificationFilter]=useState("TODOS");
   const [verificationSignal,setVerificationSignal]=useState(0);
+  const [syncState,setSyncState]=useState<"idle"|"syncing"|"success"|"error">("idle");
+  const [lastSync,setLastSync]=useState("");
+  const [pendingSync,setPendingSync]=useState(0);
   const [records, setRecords] = useState<Record<string, Array<Record<string, unknown>>>>({});
   const loadRecords = useCallback(async () => {
+    setSyncState("syncing");
     try {
-      setRecords(await listRecords());
-    } catch { /* la interfaz conserva un estado recuperable */ }
+      setRecords(await listRecords());setPendingSync(await pendingOperations());
+      const now=new Date();if(navigator.onLine)setLastSync(now.toLocaleString("es-CO",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}));setSyncState(navigator.onLine?"success":"idle");return true;
+    } catch {setPendingSync(await pendingOperations());setSyncState("error");return false;}
   }, []);
   useEffect(() => {
     if (!backendConfigured()) { setChecking(false); return; }
@@ -85,7 +90,7 @@ export default function Home() {
               <p className="hidden text-xs text-slate-300 sm:block">Control de inventario y ubicación</p>
             </div>
           </div>
-          <div className="flex items-center gap-2"><InstallAppButton/>{currentUser?.rol === "ADMINISTRADOR" && <AccessDialog/>}<Button variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => { logout(); setAuthenticated(false); setCurrentUser(null); }}><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Cerrar sesión</span></Button></div>
+          <div className="flex flex-wrap items-center justify-end gap-2"><div className="text-right"><Button type="button" onClick={()=>void loadRecords()} disabled={syncState==="syncing"} className="h-9 rounded-lg bg-white px-3 text-xs font-semibold text-[#0d2c3e] hover:bg-slate-100">{syncState==="syncing"?<RefreshCw className="h-4 w-4 animate-spin"/>:syncState==="success"?<Check className="h-4 w-4 text-emerald-600"/>:syncState==="error"?<AlertTriangle className="h-4 w-4 text-red-600"/>:<RefreshCw className="h-4 w-4"/>}SINCRONIZAR{pendingSync>0&&<span className="rounded-full bg-amber-400 px-1.5 py-0.5 text-[10px]">{pendingSync}</span>}</Button>{lastSync&&<p className="mt-0.5 text-[10px] text-slate-300">Sinc. {lastSync}</p>}</div><InstallAppButton/>{currentUser?.rol === "ADMINISTRADOR" && <AccessDialog/>}<Button variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => { logout(); setAuthenticated(false); setCurrentUser(null); }}><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Cerrar sesión</span></Button></div>
         </div>
       </header>
 
