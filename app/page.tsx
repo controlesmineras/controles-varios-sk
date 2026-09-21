@@ -8,6 +8,7 @@ import { RecordDialog } from "@/components/record-dialog";
 import { AccessDialog } from "@/components/access-dialog";
 import { MovementDialog } from "@/components/movement-dialog";
 import { VerificationDialog } from "@/components/verification-dialog";
+import { InstallAppButton } from "@/components/install-app-button";
 import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout } from "@/lib/backend";
 
 const modules = [
@@ -84,7 +85,7 @@ export default function Home() {
               <p className="hidden text-xs text-slate-300 sm:block">Control de inventario y ubicación</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">{currentUser?.rol === "ADMINISTRADOR" && <AccessDialog/>}<Button variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => { logout(); setAuthenticated(false); setCurrentUser(null); }}><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Cerrar sesión</span></Button></div>
+          <div className="flex items-center gap-2"><InstallAppButton/>{currentUser?.rol === "ADMINISTRADOR" && <AccessDialog/>}<Button variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => { logout(); setAuthenticated(false); setCurrentUser(null); }}><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Cerrar sesión</span></Button></div>
         </div>
       </header>
 
