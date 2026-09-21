@@ -11,6 +11,13 @@ function configurarSistema() {
   Logger.log("Base privada creada: " + DriveApp.getFileById(PropertiesService.getScriptProperties().getProperty(APP.property)).getUrl());
 }
 
+function restablecerAdministradorManual() {
+  const props=PropertiesService.getScriptProperties();const nueva=props.getProperty("ADMIN_RESET_PASSWORD");
+  if(!nueva)throw new Error("Agrega primero la propiedad ADMIN_RESET_PASSWORD en Configuración del proyecto.");
+  const validada=password_(nueva);const result=locked_(function(db){const account=db.users.find(function(u){return u.protegido===true;})||db.users.find(function(u){return u.rol==="ADMINISTRADOR";});if(!account)throw new Error("No existe una cuenta administradora.");const salt=token_();account.salt=salt;account.hash=hash_(salt+validada);account.activo=true;db.sessions=[];return {usuario:account.usuario,nombre:account.nombre};});
+  props.deleteProperty("ADMIN_RESET_PASSWORD");Logger.log("Administrador restablecido. Usuario: "+result.usuario+" · Nombre: "+result.nombre);return result;
+}
+
 function doGet() { return json_({ ok: true, servicio: "CONTROL EXPLOSIVOS SK" }); }
 
 function doPost(e) {
