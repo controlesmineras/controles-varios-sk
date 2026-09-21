@@ -1,0 +1,14 @@
+{
+  "name": "CONTROL EXPLOSIVOS SK",
+  "short_name": "EXPLOSIVOS SK",
+  "description": "Control de inventario, ubicación y sellos de seguridad.",
+  "start_url": "/controles-varios-sk/",
+  "scope": "/controles-varios-sk/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#0d2c3e",
+  "lang": "es",
+  "icons": [
+    {"src":"/controles-varios-sk/favicon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}
+  ]
+}
