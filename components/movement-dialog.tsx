@@ -12,7 +12,7 @@ type Records=Record<string,Array<Record<string,unknown>>>;
 
 export function MovementDialog({records,onSaved}:{records:Records;onSaved:()=>void}){
   const [open,setOpen]=useState(false);const [type,setType]=useState("INDUGEL");const [id,setId]=useState("");const [query,setQuery]=useState("");const [saving,setSaving]=useState(false);const [error,setError]=useState("");
-  const options=records[type]||[];const selected=useMemo(()=>options.find(r=>String(r.id)===id),[options,id]);
+  const options=(records[type]||[]).filter(r=>r.verificado!==false);const selected=useMemo(()=>options.find(r=>String(r.id)===id),[options,id]);
   const matches=useMemo(()=>{const term=query.trim().toLocaleLowerCase("es");if(!term)return [];return options.filter(r=>[r.serial,r.cajaNumero,r.loteProduccion,r.contenido].some(value=>String(value??"").toLocaleLowerCase("es").includes(term))).slice(0,12);},[options,query]);
   const destination=selected?.ubicacion==="Polvorín superficie"?"Polvorín interior de mina":"Polvorín superficie";
   function label(r:Record<string,unknown>){return String(r.serial||r.cajaNumero||r.loteProduccion||r.id);}
