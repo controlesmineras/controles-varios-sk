@@ -1,46 +1,18 @@
-declare global {
-  interface Window {
-    CONTROL_EXPLOSIVOS_CONFIG?: { apiUrl?: string };
-  }
-}
-
-const apiUrl = () => window.CONTROL_EXPLOSIVOS_CONFIG?.apiUrl?.trim() || "";
-
-export function backendConfigured() {
-  return Boolean(apiUrl());
-}
-
-type ApiResult = Record<string, any>;
-
-async function request(action: string, data: Record<string, unknown> = {}): Promise<ApiResult> {
-  const url = apiUrl();
-  if (!url) throw new Error("La aplicación aún no está conectada al servidor de la empresa.");
-  const token = localStorage.getItem("control_explosivos_token") || "";
-  const body = new URLSearchParams({ payload: JSON.stringify({ action, token, ...data }) });
-  const response = await fetch(url, { method: "POST", body });
-  const result = await response.json() as ApiResult;
-  if (!result.ok) throw new Error(result.error || "No se pudo completar la operación.");
-  return result;
-}
-
-export async function getStatus() { return request("status"); }
-export async function login(usuario: string, password: string) {
-  const result = await request("login", { usuario, password });
-  localStorage.setItem("control_explosivos_token", result.token);
-  return result;
-}
-export async function createInitialAdmin(usuario: string, nombre: string, password: string) {
-  const result = await request("bootstrap", { usuario, nombre, password });
-  localStorage.setItem("control_explosivos_token", result.token);
-  return result;
-}
-export function logout() { localStorage.removeItem("control_explosivos_token"); }
-export async function listRecords() { return (await request("list")).records; }
-export async function saveRecord(record: Record<string, unknown>) { return request("create", { record }); }
-export async function saveBatchRecords(batch: Record<string, unknown>) { return request("createBatch", { batch }); }
-export async function verifyBatchRecords(tipo: string, unidades: Array<Record<string, unknown>>) { return request("verifyBatch", { tipo, unidades }); }
-export async function listUsers() { return (await request("usersList")).users; }
-export async function createUser(usuario: string, nombre: string, password: string, rol: string) { return request("userCreate", { usuario, nombre, password, rol }); }
-export async function resetUserPassword(usuario: string, password: string) { return request("userResetPassword", { usuario, password }); }
-export async function setUserActive(usuario: string, activo: boolean) { return request("userSetActive", { usuario, activo }); }
-export async function moveRecord(tipo: string, id: string, ubicacion: string) { return request("move", { tipo, id, ubicacion }); }
+import {enqueue,getCachedRecords,getOperations,removeOperation,setCachedRecords} from "@/lib/offline-store";
+declare global{interface Window{CONTROL_EXPLOSIVOS_CONFIG?:{apiUrl?:string};}}
+const apiUrl=()=>window.CONTROL_EXPLOSIVOS_CONFIG?.apiUrl?.trim()||"";type ApiResult=Record<string,any>;type Records=Record<string,Array<Record<string,unknown>>>;
+export function backendConfigured(){return Boolean(apiUrl());}
+async function request(action:string,data:Record<string,unknown>={}):Promise<ApiResult>{const url=apiUrl();if(!url)throw new Error("La aplicación aún no está conectada al servidor de la empresa.");const token=localStorage.getItem("control_explosivos_token")||"";const body=new URLSearchParams({payload:JSON.stringify({action,token,...data})});const response=await fetch(url,{method:"POST",body});const result=await response.json() as ApiResult;if(!result.ok)throw new Error(result.error||"No se pudo completar la operación.");return result;}
+export async function getStatus(){try{const result=await request("status");if(result.authenticated&&result.usuario)localStorage.setItem("control_explosivos_user",JSON.stringify(result.usuario));return result;}catch(error){const user=localStorage.getItem("control_explosivos_user");if(user)return {ok:true,needsBootstrap:false,authenticated:true,usuario:JSON.parse(user),offline:true};throw error;}}
+export async function login(usuario:string,password:string){const result=await request("login",{usuario,password});localStorage.setItem("control_explosivos_token",result.token);localStorage.setItem("control_explosivos_user",JSON.stringify(result.usuario));return result;}
+export async function createInitialAdmin(usuario:string,nombre:string,password:string){const result=await request("bootstrap",{usuario,nombre,password});localStorage.setItem("control_explosivos_token",result.token);localStorage.setItem("control_explosivos_user",JSON.stringify(result.usuario));return result;}
+export function logout(){localStorage.removeItem("control_explosivos_token");localStorage.removeItem("control_explosivos_user");}
+export async function synchronize(){const operations=await getOperations();for(const operation of operations){await request(operation.action,{...operation.data,operationId:operation.id});await removeOperation(operation.id);}const records=(await request("list")).records as Records;await setCachedRecords(records);return {records,pending:(await getOperations()).length};}
+export async function listRecords(){const cached=await getCachedRecords();if(navigator.onLine){try{return (await synchronize()).records;}catch{return cached;}}return cached;}
+async function updateLocal(mutator:(records:Records)=>void){const records=await getCachedRecords();for(const type of ["INDUGEL","ANFO","MECHA DE SEGURIDAD","DETONADORES","SELLOS"])records[type]=records[type]||[];mutator(records);await setCachedRecords(records);}
+export async function saveRecord(record:Record<string,unknown>){const id=crypto.randomUUID();const type=String(record.tipo);const item={...record,id,fechaRegistro:new Date().toISOString(),...((type==="INDUGEL"||type==="ANFO")?{verificado:true,fechaVerificacion:new Date().toISOString()}:{}),movimientos:[]};await updateLocal(records=>{if((type==="INDUGEL"||type==="ANFO")&&records[type].some(value=>String(value.serial)===String(record.serial)))throw new Error("Ese serial ya está registrado en este dispositivo.");records[type].unshift(item);});await enqueue("create",{record:item});return {ok:true,id,local:true};}
+export async function saveBatchRecords(batch:Record<string,any>){const type=String(batch.tipo);const loteIngreso=crypto.randomUUID();const items:Array<Record<string,unknown>>=[];const generated=new Set<number>();for(const range of batch.rangos||[]){const from=Number(range.desde),to=Number(range.hasta);if(!Number.isFinite(from)||!Number.isFinite(to)||to<from)throw new Error("El rango de seriales no es válido.");for(let serial=from;serial<=to;serial++){if(generated.has(serial))throw new Error(`El serial ${serial} está repetido entre los grupos.`);generated.add(serial);items.push({id:crypto.randomUUID(),serial,tipo:type,fechaFabricacion:batch.fechaFabricacion,fechaVencimiento:batch.fechaVencimiento,fechaIngreso:batch.fechaIngreso,ubicacion:batch.ubicacion,fechaRegistro:new Date().toISOString(),verificado:false,movimientos:[],loteIngreso});}}await updateLocal(records=>{const existing=new Set(records[type].map(value=>Number(value.serial)));const duplicate=items.find(item=>existing.has(Number(item.serial)));if(duplicate)throw new Error(`El serial ${duplicate.serial} ya está registrado en este dispositivo.`);records[type].unshift(...items);});await enqueue("createBatch",{batch:{...batch,items,loteIngreso}});return {ok:true,cantidad:items.length,loteIngreso,local:true};}
+export async function verifyBatchRecords(tipo:string,unidades:Array<Record<string,unknown>>){const ids=new Set(unidades.map(unit=>String(unit.id)));await updateLocal(records=>records[tipo].forEach(item=>{if(ids.has(String(item.id))){const unit=unidades.find(value=>String(value.id)===String(item.id))!;item.fechaFabricacion=unit.fechaFabricacion;item.fechaVencimiento=unit.fechaVencimiento;item.verificado=true;item.fechaVerificacion=new Date().toISOString();}}));await enqueue("verifyBatch",{tipo,unidades});return {ok:true,cantidad:unidades.length,local:true};}
+export async function moveRecord(tipo:string,id:string,ubicacion:string){await updateLocal(records=>{const item=records[tipo].find(value=>String(value.id)===id);if(!item)throw new Error("Registro no encontrado.");const origen=item.ubicacion;item.ubicacion=ubicacion;const movements=(item.movimientos as Array<Record<string,unknown>>)||[];movements.unshift({fecha:new Date().toISOString(),origen,destino:ubicacion});item.movimientos=movements;});await enqueue("move",{tipo,id,ubicacion});return {ok:true,local:true};}
+export const pendingOperations=async()=> (await getOperations()).length;
+export async function listUsers(){return (await request("usersList")).users;}export async function createUser(usuario:string,nombre:string,password:string,rol:string){return request("userCreate",{usuario,nombre,password,rol});}export async function resetUserPassword(usuario:string,password:string){return request("userResetPassword",{usuario,password});}export async function setUserActive(usuario:string,activo:boolean){return request("userSetActive",{usuario,activo});}
