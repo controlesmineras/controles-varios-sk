@@ -24,6 +24,7 @@ function doPost(e) {
     if (action === "list") return json_({ ok: true, records: publicRecords_(load_()) });
     if (action === "create") return json_(create_(body.record || {}, user.usuario));
     if (action === "createBatch") return json_(createBatch_(body.batch || {}, user.usuario));
+    if (action === "verifyBatch") return json_(verifyBatch_(body, user.usuario));
     if (action === "move") return json_(move_(body, user.usuario));
     if (action === "usersList") return json_(usersList_(user));
     if (action === "userCreate") return json_(userCreate_(body, user));
@@ -99,7 +100,7 @@ function create_(r,usuario) {
   return locked_(function(db) {
     const type=required_(r.tipo,"tipo"); if(!db.records[type])throw new Error("Tipo de registro no reconocido.");
     const base={id:Utilities.getUuid(),fechaRegistro:iso_(),usuario:usuario}; let item;
-    if(type==="INDUGEL"||type==="ANFO") { const serial=number_(r.serial,"serial"); unique_(db.records[type],"serial",serial); const fabricacion=required_(r.fechaFabricacion,"fecha de fabricación"); const vencimiento=required_(r.fechaVencimiento,"fecha de vencimiento"); item=Object.assign(base,{serial:serial,fechaFabricacion:fabricacion,fechaVencimiento:vencimiento,movimientos:[]},common_(r)); }
+    if(type==="INDUGEL"||type==="ANFO") { const serial=number_(r.serial,"serial"); unique_(db.records[type],"serial",serial); const fabricacion=required_(r.fechaFabricacion,"fecha de fabricación"); const vencimiento=required_(r.fechaVencimiento,"fecha de vencimiento"); item=Object.assign(base,{serial:serial,fechaFabricacion:fabricacion,fechaVencimiento:vencimiento,verificado:true,fechaVerificacion:iso_(),verificadoPor:usuario,movimientos:[]},common_(r)); }
     else if(type==="DETONADORES") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); item=Object.assign(base,{cajaNumero:caja,contenido:required_(r.contenido,"contenido"),loteProduccion:required_(r.loteProduccion,"lote"),fechaProduccion:required_(r.fechaProduccion,"fecha de producción"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento"),movimientos:[]},common_(r)); }
     else if(type==="MECHA DE SEGURIDAD") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); const ranges={bobina1Inicial1:number_(r.bobina1Inicial1,"serial"),bobina1Final1:number_(r.bobina1Final1,"serial"),bobina1Inicial2:optionalNumber_(r.bobina1Inicial2),bobina1Final2:optionalNumber_(r.bobina1Final2),bobina2Inicial1:number_(r.bobina2Inicial1,"serial"),bobina2Final1:number_(r.bobina2Final1,"serial"),bobina2Inicial2:optionalNumber_(r.bobina2Inicial2),bobina2Final2:optionalNumber_(r.bobina2Final2)}; range_(ranges.bobina1Inicial1,ranges.bobina1Final1);rangeOptional_(ranges.bobina1Inicial2,ranges.bobina1Final2);range_(ranges.bobina2Inicial1,ranges.bobina2Final1);rangeOptional_(ranges.bobina2Inicial2,ranges.bobina2Final2); item=Object.assign(base,{cajaNumero:caja,cantidad:number_(r.cantidad,"cantidad"),contenido:required_(r.contenido,"contenido"),fechaFabricacion:required_(r.fechaFabricacion,"fecha de fabricación"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento"),movimientos:[]},common_(r),ranges); }
     else { item=Object.assign(base,{fecha:required_(r.fecha,"fecha"),selloIndugel:number_(r.selloIndugel,"sello Indugel"),selloAnfo:number_(r.selloAnfo,"sello Anfo")}); }
@@ -114,21 +115,30 @@ function createBatch_(r,usuario) {
     const fabricacion=required_(r.fechaFabricacion,"fecha de fabricación"); const vencimiento=required_(r.fechaVencimiento,"fecha de vencimiento"); const common=common_(r);
     const seriales=[]; const vistos={};
     r.rangos.forEach(function(rango,index){
-      if(rango.verificado!==true)throw new Error("Debes verificar las fechas del rango "+(index+1)+".");
       const desde=number_(rango.desde,"serial inicial del rango "+(index+1)); const hasta=number_(rango.hasta,"serial final del rango "+(index+1)); range_(desde,hasta);
       if(hasta-desde+1>5000)throw new Error("Un rango no puede contener más de 5.000 seriales.");
       for(let serial=desde;serial<=hasta;serial++){if(vistos[serial])throw new Error("El serial "+serial+" está repetido entre los rangos.");vistos[serial]=true;seriales.push(serial);}
     });
     const existentes={}; db.records[type].forEach(function(item){existentes[item.serial]=true;}); const repetido=seriales.find(function(serial){return existentes[serial];}); if(repetido!==undefined)throw new Error("El serial "+repetido+" ya existe y no se guardó ningún registro.");
-    const fechaRegistro=iso_(); const lote=Utilities.getUuid(); const items=seriales.map(function(serial){return Object.assign({id:Utilities.getUuid(),fechaRegistro:fechaRegistro,usuario:usuario,serial:serial,fechaFabricacion:fabricacion,fechaVencimiento:vencimiento,movimientos:[],loteIngreso:lote},common);});
+    const fechaRegistro=iso_(); const lote=Utilities.getUuid(); const items=seriales.map(function(serial){return Object.assign({id:Utilities.getUuid(),fechaRegistro:fechaRegistro,usuario:usuario,serial:serial,fechaFabricacion:fabricacion,fechaVencimiento:vencimiento,verificado:false,movimientos:[],loteIngreso:lote},common);});
     db.records[type]=items.concat(db.records[type]); return {ok:true,cantidad:items.length,loteIngreso:lote};
+  });
+}
+
+function verifyBatch_(body,usuario) {
+  return locked_(function(db) {
+    const type=required_(body.tipo,"tipo"); if(type!=="INDUGEL"&&type!=="ANFO")throw new Error("Tipo de material no válido para verificación.");
+    if(!Array.isArray(body.unidades)||!body.unidades.length)throw new Error("Debes marcar al menos un serial como REVISADO / INGRESAR.");
+    const cambios=body.unidades.map(function(unidad){const id=required_(unidad.id,"registro");const item=db.records[type].find(function(x){return x.id===id;});if(!item)throw new Error("No se encontró uno de los seriales seleccionados.");return {item:item,fabricacion:required_(unidad.fechaFabricacion,"fecha de fabricación"),vencimiento:required_(unidad.fechaVencimiento,"fecha de vencimiento")};});
+    const fecha=iso_(); cambios.forEach(function(cambio){cambio.item.fechaFabricacion=cambio.fabricacion;cambio.item.fechaVencimiento=cambio.vencimiento;cambio.item.verificado=true;cambio.item.fechaVerificacion=fecha;cambio.item.verificadoPor=usuario;});
+    return {ok:true,cantidad:cambios.length};
   });
 }
 
 function move_(body,usuario) {
   return locked_(function(db) {
     const tipo=required_(body.tipo,"tipo"); if(tipo==="SELLOS"||!db.records[tipo])throw new Error("Tipo de material no válido.");
-    const item=db.records[tipo].find(x=>x.id===required_(body.id,"registro")); if(!item)throw new Error("Registro no encontrado.");
+    const item=db.records[tipo].find(x=>x.id===required_(body.id,"registro")); if(!item)throw new Error("Registro no encontrado."); if((tipo==="INDUGEL"||tipo==="ANFO")&&item.verificado===false)throw new Error("El serial debe verificarse antes de registrar movimientos.");
     const destino=required_(body.ubicacion,"ubicación"); if(APP.locations.indexOf(destino)<0)throw new Error("Ubicación no válida."); if(item.ubicacion===destino)throw new Error("El material ya se encuentra en esa ubicación.");
     item.movimientos=item.movimientos||[]; item.movimientos.unshift({fecha:iso_(),origen:item.ubicacion,destino:destino,usuario:usuario}); item.ubicacion=destino;
     return {ok:true};
