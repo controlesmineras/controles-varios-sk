@@ -34,14 +34,15 @@ function AutoExpiryDates() {
 
 function BatchRanges({ count, setCount }: { count: number; setCount: (value: number) => void }) {
   return <fieldset className="space-y-3 sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50/40 p-4">
-    <legend className="px-2 text-sm font-semibold">RANGOS DE SERIALES</legend>
-    <p className="text-xs text-slate-600">Se creará un registro por cada serial comprendido entre DESDE y HASTA, incluidos ambos extremos.</p>
+    <legend className="px-2 text-sm font-semibold">GRUPOS DE SERIALES CONSECUTIVOS</legend>
+    <p className="text-xs text-slate-600">Cada grupo corresponde a un conjunto consecutivo del mismo ingreso masivo. Se incluirán todos los seriales desde el inicial hasta el final, ambos incluidos.</p>
     {Array.from({length:count},(_,index)=><div key={index} className="grid gap-3 rounded-xl border bg-white p-4 sm:grid-cols-2">
-      <Field name={`rangoDesde${index}`} label={`RANGO ${index+1} · DESDE`} type="number" />
-      <Field name={`rangoHasta${index}`} label={`RANGO ${index+1} · HASTA`} type="number" />
-      {count>1&&<Button type="button" variant="outline" onClick={()=>setCount(count-1)} className="justify-self-start text-red-700 sm:col-span-2"><Trash2 className="h-4 w-4"/>QUITAR ÚLTIMO RANGO</Button>}
+      <p className="text-sm font-semibold text-[#0d2c3e] sm:col-span-2">GRUPO {index+1}</p>
+      <Field name={`rangoDesde${index}`} label="SERIAL INICIAL" type="number" />
+      <Field name={`rangoHasta${index}`} label="SERIAL FINAL" type="number" />
+      {count>1&&index===count-1&&<Button type="button" variant="outline" onClick={()=>setCount(count-1)} className="justify-self-start text-red-700 sm:col-span-2"><Trash2 className="h-4 w-4"/>QUITAR ÚLTIMO GRUPO</Button>}
     </div>)}
-    <Button type="button" variant="outline" onClick={()=>setCount(count+1)}><Plus className="h-4 w-4"/>AGREGAR OTRO RANGO</Button>
+    <Button type="button" variant="outline" onClick={()=>setCount(count+1)}><Plus className="h-4 w-4"/>AGREGAR OTRO GRUPO</Button>
   </fieldset>;
 }
 
