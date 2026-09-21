@@ -39,7 +39,6 @@ function BatchRanges({ count, setCount }: { count: number; setCount: (value: num
     {Array.from({length:count},(_,index)=><div key={index} className="grid gap-3 rounded-xl border bg-white p-4 sm:grid-cols-2">
       <Field name={`rangoDesde${index}`} label={`RANGO ${index+1} · DESDE`} type="number" />
       <Field name={`rangoHasta${index}`} label={`RANGO ${index+1} · HASTA`} type="number" />
-      <label className="flex items-start gap-2 text-sm sm:col-span-2"><input name={`rangoVerificado${index}`} type="checkbox" required className="mt-0.5 h-4 w-4"/><span>VERIFIQUÉ LA FECHA DE FABRICACIÓN Y VENCIMIENTO EN UN ELEMENTO DE ESTE RANGO.</span></label>
       {count>1&&<Button type="button" variant="outline" onClick={()=>setCount(count-1)} className="justify-self-start text-red-700 sm:col-span-2"><Trash2 className="h-4 w-4"/>QUITAR ÚLTIMO RANGO</Button>}
     </div>)}
     <Button type="button" variant="outline" onClick={()=>setCount(count+1)}><Plus className="h-4 w-4"/>AGREGAR OTRO RANGO</Button>
@@ -53,7 +52,7 @@ function Bobina({ number }: { number: 1 | 2 }) {
   </div></fieldset>;
 }
 
-export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, triggerClassName }: { initialType?: string; onSaved?: () => void; triggerLabel?: string; triggerClassName?: string }) {
+export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, triggerClassName }: { initialType?: string; onSaved?: (result?:Record<string,unknown>) => void; triggerLabel?: string; triggerClassName?: string }) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState(initialType);
   const [saving, setSaving] = useState(false);
@@ -68,11 +67,12 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries());
     try {
+      let result:Record<string,unknown>;
       if(batchMode&&(type==="INDUGEL"||type==="ANFO")){
-        const rangos=Array.from({length:rangeCount},(_,index)=>({desde:form.get(`rangoDesde${index}`),hasta:form.get(`rangoHasta${index}`),verificado:form.get(`rangoVerificado${index}`)==="on"}));
-        await saveBatchRecords({tipo:type,fechaFabricacion:payload.fechaFabricacion,fechaVencimiento:payload.fechaVencimiento,fechaIngreso:payload.fechaIngreso,ubicacion:payload.ubicacion,rangos});
-      }else await saveRecord({ ...payload, tipo: type });
-      setOpen(false); onSaved?.();
+        const rangos=Array.from({length:rangeCount},(_,index)=>({desde:form.get(`rangoDesde${index}`),hasta:form.get(`rangoHasta${index}`)}));
+        result=await saveBatchRecords({tipo:type,fechaFabricacion:payload.fechaFabricacion,fechaVencimiento:payload.fechaVencimiento,fechaIngreso:payload.fechaIngreso,ubicacion:payload.ubicacion,rangos});
+      }else result=await saveRecord({ ...payload, tipo: type });
+      setOpen(false); onSaved?.(result);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo guardar."); }
     finally { setSaving(false); }
   }
