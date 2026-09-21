@@ -123,7 +123,7 @@ export default function Home() {
           <aside className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
             <div className="flex items-center gap-3">
               <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><MapPin className="h-5 w-5" /></span>
-              <div><h2 className="font-semibold">Ubicaciones</h2><p className="text-sm text-slate-500">Existencias por polvorín</p></div>
+              <div><h2 className="font-semibold">DISTRIBUCIÓN</h2><p className="text-sm text-slate-500">Existencias por polvorín</p></div>
             </div>
             <div className="mt-5 space-y-3">
               {["Polvorín superficie", "Polvorín interior de mina"].map((location) => (
