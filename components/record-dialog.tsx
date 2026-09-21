@@ -23,10 +23,10 @@ function CommonFields() {
   </>;
 }
 
-function IndugelDates() {
-  const [fabricacion,setFabricacion]=useState("");
-  const vencimiento=fabricacion?`${Number(fabricacion.slice(0,4))+1}${fabricacion.slice(4)}`:"";
-  return <><div className="space-y-1.5"><Label htmlFor="fechaFabricacion">FECHA DE FABRICACIÓN</Label><Input id="fechaFabricacion" name="fechaFabricacion" type="date" required value={fabricacion} onChange={e=>setFabricacion(e.target.value)}/></div><div className="space-y-1.5"><Label htmlFor="fechaVencimiento">FECHA DE VENCIMIENTO</Label><Input id="fechaVencimiento" name="fechaVencimiento" type="date" required readOnly value={vencimiento} className="bg-slate-100"/><p className="text-xs text-slate-500">Calculada automáticamente: fabricación + 1 año.</p></div></>;
+function AutoExpiryDates() {
+  const [fabricacion,setFabricacion]=useState(""); const [vencimiento,setVencimiento]=useState("");
+  function changeFabricacion(value:string){setFabricacion(value);setVencimiento(value?`${Number(value.slice(0,4))+1}${value.slice(4)}`:"");}
+  return <><div className="space-y-1.5"><Label htmlFor="fechaFabricacion">FECHA DE FABRICACIÓN</Label><Input id="fechaFabricacion" name="fechaFabricacion" type="date" required value={fabricacion} onChange={e=>changeFabricacion(e.target.value)}/></div><div className="space-y-1.5"><Label htmlFor="fechaVencimiento">FECHA DE VENCIMIENTO</Label><Input id="fechaVencimiento" name="fechaVencimiento" type="date" required value={vencimiento} onChange={e=>setVencimiento(e.target.value)}/><p className="text-xs text-slate-500">Sugerida automáticamente: fabricación + 1 año. Puede corregirse.</p></div></>;
 }
 
 function Bobina({ number }: { number: 1 | 2 }) {
@@ -60,8 +60,7 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
       <form onSubmit={submit} className="space-y-5">
         <div className="space-y-1.5"><Label htmlFor="tipo">TIPO</Label><select id="tipo" value={type} onChange={(e) => setType(e.target.value)} className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm">{types.map((value) => <option key={value}>{value}</option>)}</select></div>
         <div className="grid gap-4 sm:grid-cols-2" key={type}>
-          {type === "INDUGEL" && <><Field name="serial" label="SERIAL" type="number" /><IndugelDates/><CommonFields /></>}
-          {type === "ANFO" && <><Field name="serial" label="SERIAL" type="number" /><Field name="fechaFabricacion" label="FECHA DE FABRICACIÓN" type="date" /><Field name="fechaVencimiento" label="FECHA DE VENCIMIENTO" type="date" /><CommonFields /></>}
+          {(type === "INDUGEL" || type === "ANFO") && <><Field name="serial" label="SERIAL" type="number" /><AutoExpiryDates/><CommonFields /></>}
           {type === "DETONADORES" && <><Field name="cajaNumero" label="CAJA No." /><Field name="contenido" label="CONTENIDO" /><Field name="loteProduccion" label="LOTE DE PRODUCCIÓN" /><Field name="fechaProduccion" label="FECHA DE PRODUCCIÓN" type="date" /><Field name="fechaVencimiento" label="FECHA DE VENCIMIENTO" type="date" /><CommonFields /></>}
           {type === "MECHA DE SEGURIDAD" && <><Field name="cajaNumero" label="CAJA No." /><Field name="cantidad" label="CANTIDAD" type="number" /><Field name="contenido" label="CONTENIDO" /><Field name="fechaFabricacion" label="FECHA DE FABRICACIÓN" type="date" /><Field name="fechaVencimiento" label="FECHA DE VENCIMIENTO" type="date" /><CommonFields /><Bobina number={1} /><Bobina number={2} /></>}
           {type === "SELLOS" && <><Field name="fecha" label="FECHA" type="date" /><Field name="selloIndugel" label="SELLO DE SEGURIDAD INDUGEL" type="number" /><Field name="selloAnfo" label="SELLO DE SEGURIDAD ANFO" type="number" /></>}

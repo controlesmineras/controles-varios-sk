@@ -46,6 +46,7 @@ function load_() {
   try {
     const db = JSON.parse(DriveApp.getFileById(id).getBlob().getDataAsString("UTF-8"));
     db.records = db.records || emptyDb_().records; db.users = db.users || []; db.sessions = db.sessions || [];
+    if(db.users.length&&!db.users.some(u=>u.protegido===true))db.users[0].protegido=true;
     return db;
   } catch (_) { throw new Error("No se pudo leer la base privada. Verifica que el archivo no haya sido eliminado."); }
 }
@@ -66,7 +67,7 @@ function bootstrap_(body) {
   return locked_(function(db) {
     if (db.users.length) throw new Error("El administrador inicial ya fue creado.");
     const usuario = required_(body.usuario,"usuario").toLowerCase(); const nombre=required_(body.nombre,"nombre"); const password=password_(body.password); const salt=token_();
-    db.users.push({ usuario:usuario,nombre:nombre,salt:salt,hash:hash_(salt+password),rol:"ADMINISTRADOR",activo:true,creado:iso_() });
+    db.users.push({ usuario:usuario,nombre:nombre,salt:salt,hash:hash_(salt+password),rol:"ADMINISTRADOR",activo:true,protegido:true,creado:iso_() });
     const result = newSession_(db,usuario); return result;
   });
 }
@@ -97,7 +98,7 @@ function create_(r,usuario) {
   return locked_(function(db) {
     const type=required_(r.tipo,"tipo"); if(!db.records[type])throw new Error("Tipo de registro no reconocido.");
     const base={id:Utilities.getUuid(),fechaRegistro:iso_(),usuario:usuario}; let item;
-    if(type==="INDUGEL"||type==="ANFO") { const serial=number_(r.serial,"serial"); unique_(db.records[type],"serial",serial); const fabricacion=required_(r.fechaFabricacion,"fecha de fabricación"); const vencimiento=type==="INDUGEL"?addYear_(fabricacion):required_(r.fechaVencimiento,"fecha de vencimiento"); item=Object.assign(base,{serial:serial,fechaFabricacion:fabricacion,fechaVencimiento:vencimiento,movimientos:[]},common_(r)); }
+    if(type==="INDUGEL"||type==="ANFO") { const serial=number_(r.serial,"serial"); unique_(db.records[type],"serial",serial); const fabricacion=required_(r.fechaFabricacion,"fecha de fabricación"); const vencimiento=required_(r.fechaVencimiento,"fecha de vencimiento"); item=Object.assign(base,{serial:serial,fechaFabricacion:fabricacion,fechaVencimiento:vencimiento,movimientos:[]},common_(r)); }
     else if(type==="DETONADORES") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); item=Object.assign(base,{cajaNumero:caja,contenido:required_(r.contenido,"contenido"),loteProduccion:required_(r.loteProduccion,"lote"),fechaProduccion:required_(r.fechaProduccion,"fecha de producción"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento"),movimientos:[]},common_(r)); }
     else if(type==="MECHA DE SEGURIDAD") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); const ranges={bobina1Inicial1:number_(r.bobina1Inicial1,"serial"),bobina1Final1:number_(r.bobina1Final1,"serial"),bobina1Inicial2:optionalNumber_(r.bobina1Inicial2),bobina1Final2:optionalNumber_(r.bobina1Final2),bobina2Inicial1:number_(r.bobina2Inicial1,"serial"),bobina2Final1:number_(r.bobina2Final1,"serial"),bobina2Inicial2:optionalNumber_(r.bobina2Inicial2),bobina2Final2:optionalNumber_(r.bobina2Final2)}; range_(ranges.bobina1Inicial1,ranges.bobina1Final1);rangeOptional_(ranges.bobina1Inicial2,ranges.bobina1Final2);range_(ranges.bobina2Inicial1,ranges.bobina2Final1);rangeOptional_(ranges.bobina2Inicial2,ranges.bobina2Final2); item=Object.assign(base,{cajaNumero:caja,cantidad:number_(r.cantidad,"cantidad"),contenido:required_(r.contenido,"contenido"),fechaFabricacion:required_(r.fechaFabricacion,"fecha de fabricación"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento"),movimientos:[]},common_(r),ranges); }
     else { item=Object.assign(base,{fecha:required_(r.fecha,"fecha"),selloIndugel:number_(r.selloIndugel,"sello Indugel"),selloAnfo:number_(r.selloAnfo,"sello Anfo")}); }
@@ -117,14 +118,13 @@ function move_(body,usuario) {
 
 function publicRecords_(db){return {INDUGEL:db.records.INDUGEL.slice(0,500),ANFO:db.records.ANFO.slice(0,500),"MECHA DE SEGURIDAD":db.records["MECHA DE SEGURIDAD"].slice(0,500),DETONADORES:db.records.DETONADORES.slice(0,500),SELLOS:db.records.SELLOS.slice(0,500)};}
 function requireAdmin_(u){if(!u||u.rol!=="ADMINISTRADOR")throw new Error("Esta operación requiere rol administrador.");}
-function usersList_(u){requireAdmin_(u);return {ok:true,users:load_().users.map(x=>({usuario:x.usuario,nombre:x.nombre,rol:x.rol,activo:x.activo,creado:x.creado}))};}
-function userCreate_(b,a){requireAdmin_(a);return locked_(db=>{const usuario=required_(b.usuario,"usuario").toLowerCase();if(db.users.some(u=>u.usuario===usuario))throw new Error("Ese usuario ya existe.");const rol=String(b.rol||"OPERADOR").toUpperCase();if(["ADMINISTRADOR","OPERADOR"].indexOf(rol)<0)throw new Error("Rol no válido.");const salt=token_();db.users.push({usuario:usuario,nombre:required_(b.nombre,"nombre"),salt:salt,hash:hash_(salt+password_(b.password)),rol:rol,activo:true,creado:iso_()});return {ok:true};});}
+function usersList_(u){requireAdmin_(u);return {ok:true,users:load_().users.map(x=>({usuario:x.usuario,nombre:x.nombre,rol:x.rol,activo:x.activo,protegido:x.protegido===true,creado:x.creado}))};}
+function userCreate_(b,a){requireAdmin_(a);return locked_(db=>{const usuario=required_(b.usuario,"usuario").toLowerCase();if(db.users.some(u=>u.usuario===usuario))throw new Error("Ese usuario ya existe.");const rol=String(b.rol||"OPERADOR").toUpperCase();if(["ADMINISTRADOR","OPERADOR"].indexOf(rol)<0)throw new Error("Rol no válido.");const salt=token_();db.users.push({usuario:usuario,nombre:required_(b.nombre,"nombre"),salt:salt,hash:hash_(salt+password_(b.password)),rol:rol,activo:true,protegido:false,creado:iso_()});return {ok:true};});}
 function userResetPassword_(b,a){requireAdmin_(a);return locked_(db=>{const u=db.users.find(x=>x.usuario===required_(b.usuario,"usuario").toLowerCase());if(!u)throw new Error("Usuario no encontrado.");u.salt=token_();u.hash=hash_(u.salt+password_(b.password));return {ok:true};});}
-function userSetActive_(b,a){requireAdmin_(a);return locked_(db=>{const usuario=required_(b.usuario,"usuario").toLowerCase();if(usuario===a.usuario&&b.activo===false)throw new Error("No puedes desactivar tu propio acceso.");const u=db.users.find(x=>x.usuario===usuario);if(!u)throw new Error("Usuario no encontrado.");u.activo=b.activo===true;return {ok:true};});}
+function userSetActive_(b,a){requireAdmin_(a);return locked_(db=>{const usuario=required_(b.usuario,"usuario").toLowerCase();const u=db.users.find(x=>x.usuario===usuario);if(!u)throw new Error("Usuario no encontrado.");if((usuario===a.usuario||u.protegido===true)&&b.activo===false)throw new Error("La cuenta administradora principal no puede desactivarse.");u.activo=b.activo===true;return {ok:true};});}
 
 function locked_(fn){const lock=LockService.getScriptLock();lock.waitLock(30000);try{const db=load_();const result=fn(db);save_(db);return result;}finally{lock.releaseLock();}}
 function common_(r){const ubicacion=required_(r.ubicacion,"ubicación");if(APP.locations.indexOf(ubicacion)<0)throw new Error("Ubicación no válida.");return {fechaIngreso:required_(r.fechaIngreso,"fecha de ingreso"),ubicacion:ubicacion};}
-function addYear_(date){const parts=String(date).split("-");if(parts.length!==3)throw new Error("Fecha de fabricación no válida.");return String(Number(parts[0])+1)+"-"+parts[1]+"-"+parts[2];}
 function required_(v,l){const x=String(v==null?"":v).trim();if(!x)throw new Error("El campo "+l+" es obligatorio.");return x;}
 function number_(v,l){const x=Number(v);if(!Number.isFinite(x))throw new Error("El campo "+l+" debe ser numérico.");return x;}
 function optionalNumber_(v){return v===""||v==null?null:Number(v);}
