@@ -1,12 +1,12 @@
 "use client";
 
 import { FormEvent, useEffect, useState } from "react";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { saveRecord } from "@/lib/backend";
+import { saveBatchRecords, saveRecord } from "@/lib/backend";
 
 const materialTypes = ["INDUGEL", "ANFO", "MECHA DE SEGURIDAD", "DETONADORES"];
 
@@ -32,6 +32,20 @@ function AutoExpiryDates() {
   return <><div className="space-y-1.5"><Label htmlFor="fechaFabricacion">FECHA DE FABRICACIÓN</Label><Input id="fechaFabricacion" name="fechaFabricacion" type="date" required value={fabricacion} onChange={e=>changeFabricacion(e.target.value)}/></div><div className="space-y-1.5"><Label htmlFor="fechaVencimiento">FECHA DE VENCIMIENTO</Label><Input id="fechaVencimiento" name="fechaVencimiento" type="date" required value={vencimiento} onChange={e=>setVencimiento(e.target.value)}/><p className="text-xs text-slate-500">Sugerida automáticamente: fabricación + 1 año. Puede corregirse.</p></div></>;
 }
 
+function BatchRanges({ count, setCount }: { count: number; setCount: (value: number) => void }) {
+  return <fieldset className="space-y-3 sm:col-span-2 rounded-xl border border-amber-200 bg-amber-50/40 p-4">
+    <legend className="px-2 text-sm font-semibold">RANGOS DE SERIALES</legend>
+    <p className="text-xs text-slate-600">Se creará un registro por cada serial comprendido entre DESDE y HASTA, incluidos ambos extremos.</p>
+    {Array.from({length:count},(_,index)=><div key={index} className="grid gap-3 rounded-xl border bg-white p-4 sm:grid-cols-2">
+      <Field name={`rangoDesde${index}`} label={`RANGO ${index+1} · DESDE`} type="number" />
+      <Field name={`rangoHasta${index}`} label={`RANGO ${index+1} · HASTA`} type="number" />
+      <label className="flex items-start gap-2 text-sm sm:col-span-2"><input name={`rangoVerificado${index}`} type="checkbox" required className="mt-0.5 h-4 w-4"/><span>VERIFIQUÉ LA FECHA DE FABRICACIÓN Y VENCIMIENTO EN UN ELEMENTO DE ESTE RANGO.</span></label>
+      {count>1&&<Button type="button" variant="outline" onClick={()=>setCount(count-1)} className="justify-self-start text-red-700 sm:col-span-2"><Trash2 className="h-4 w-4"/>QUITAR ÚLTIMO RANGO</Button>}
+    </div>)}
+    <Button type="button" variant="outline" onClick={()=>setCount(count+1)}><Plus className="h-4 w-4"/>AGREGAR OTRO RANGO</Button>
+  </fieldset>;
+}
+
 function Bobina({ number }: { number: 1 | 2 }) {
   return <fieldset className="sm:col-span-2 rounded-xl border border-slate-200 p-4"><legend className="px-2 text-sm font-semibold">BOBINA {number}</legend><div className="grid gap-3 sm:grid-cols-2">
     <Field name={`bobina${number}Inicial1`} label="SERIAL INICIAL 1" type="number" /><Field name={`bobina${number}Final1`} label="SERIAL FINAL 1" type="number" />
@@ -44,14 +58,20 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
   const [type, setType] = useState(initialType);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const [batchMode,setBatchMode]=useState(false);
+  const [rangeCount,setRangeCount]=useState(1);
   useEffect(() => setType(initialType), [initialType]);
   const choices=initialType==="SELLOS"?["SELLOS"]:materialTypes;
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError("");
-    const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
+    const form = new FormData(event.currentTarget);
+    const payload = Object.fromEntries(form.entries());
     try {
-      await saveRecord({ ...payload, tipo: type });
+      if(batchMode&&(type==="INDUGEL"||type==="ANFO")){
+        const rangos=Array.from({length:rangeCount},(_,index)=>({desde:form.get(`rangoDesde${index}`),hasta:form.get(`rangoHasta${index}`),verificado:form.get(`rangoVerificado${index}`)==="on"}));
+        await saveBatchRecords({tipo:type,fechaFabricacion:payload.fechaFabricacion,fechaVencimiento:payload.fechaVencimiento,fechaIngreso:payload.fechaIngreso,ubicacion:payload.ubicacion,rangos});
+      }else await saveRecord({ ...payload, tipo: type });
       setOpen(false); onSaved?.();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo guardar."); }
     finally { setSaving(false); }
@@ -62,9 +82,10 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
     <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
       <DialogHeader><DialogTitle>NUEVO REGISTRO</DialogTitle></DialogHeader>
       <form onSubmit={submit} className="space-y-5">
-        {choices.length>1&&<div className="space-y-2"><Label>TIPO DE MATERIAL</Label><div className="grid gap-2 sm:grid-cols-2">{choices.map(value=><button key={value} type="button" onClick={()=>setType(value)} className={`rounded-lg border px-3 py-3 text-sm font-semibold ${type===value?"border-[#f5b51b] bg-amber-50 text-[#0d2c3e]":"bg-white text-slate-600"}`}>{value}</button>)}</div></div>}
+        {choices.length>1&&<div className="space-y-2"><Label>TIPO DE MATERIAL</Label><div className="grid gap-2 sm:grid-cols-2">{choices.map(value=><button key={value} type="button" onClick={()=>{setType(value);setBatchMode(false);setRangeCount(1);}} className={`rounded-lg border px-3 py-3 text-sm font-semibold ${type===value?"border-[#f5b51b] bg-amber-50 text-[#0d2c3e]":"bg-white text-slate-600"}`}>{value}</button>)}</div></div>}
+        {(type==="INDUGEL"||type==="ANFO")&&<div className="grid grid-cols-2 rounded-lg border bg-slate-100 p-1"><button type="button" onClick={()=>setBatchMode(false)} className={`rounded-md px-3 py-2 text-sm font-semibold ${!batchMode?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>INGRESO INDIVIDUAL</button><button type="button" onClick={()=>setBatchMode(true)} className={`rounded-md px-3 py-2 text-sm font-semibold ${batchMode?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>INGRESO POR RANGOS</button></div>}
         <div className="grid gap-4 sm:grid-cols-2" key={type}>
-          {(type === "INDUGEL" || type === "ANFO") && <><Field name="serial" label="SERIAL" type="number" /><AutoExpiryDates/><CommonFields /></>}
+          {(type === "INDUGEL" || type === "ANFO") && <>{batchMode?<BatchRanges count={rangeCount} setCount={setRangeCount}/>:<Field name="serial" label="SERIAL" type="number" />}<AutoExpiryDates/><CommonFields /></>}
           {type === "DETONADORES" && <><Field name="cajaNumero" label="CAJA No." /><Field name="contenido" label="CONTENIDO" /><Field name="loteProduccion" label="LOTE DE PRODUCCIÓN" /><Field name="fechaProduccion" label="FECHA DE PRODUCCIÓN" type="date" /><Field name="fechaVencimiento" label="FECHA DE VENCIMIENTO" type="date" /><CommonFields /></>}
           {type === "MECHA DE SEGURIDAD" && <><Field name="cajaNumero" label="CAJA No." /><Field name="cantidad" label="CANTIDAD" type="number" /><Field name="contenido" label="CONTENIDO" /><AutoExpiryDates/><CommonFields /><Bobina number={1} /><Bobina number={2} /></>}
           {type === "SELLOS" && <><Field name="fecha" label="FECHA" type="date" /><Field name="selloIndugel" label="SELLO DE SEGURIDAD INDUGEL" type="number" /><Field name="selloAnfo" label="SELLO DE SEGURIDAD ANFO" type="number" /></>}
