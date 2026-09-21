@@ -23,6 +23,7 @@ function doPost(e) {
     const user = requireSession_(body.token);
     if (action === "list") return json_({ ok: true, records: publicRecords_(load_()) });
     if (action === "create") return json_(create_(body.record || {}, user.usuario));
+    if (action === "move") return json_(move_(body, user.usuario));
     if (action === "usersList") return json_(usersList_(user));
     if (action === "userCreate") return json_(userCreate_(body, user));
     if (action === "userResetPassword") return json_(userResetPassword_(body, user));
@@ -96,11 +97,21 @@ function create_(r,usuario) {
   return locked_(function(db) {
     const type=required_(r.tipo,"tipo"); if(!db.records[type])throw new Error("Tipo de registro no reconocido.");
     const base={id:Utilities.getUuid(),fechaRegistro:iso_(),usuario:usuario}; let item;
-    if(type==="INDUGEL"||type==="ANFO") { const serial=number_(r.serial,"serial"); unique_(db.records[type],"serial",serial); item=Object.assign(base,{serial:serial,fechaFabricacion:required_(r.fechaFabricacion,"fecha de fabricación"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento")},common_(r)); }
-    else if(type==="DETONADORES") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); item=Object.assign(base,{cajaNumero:caja,contenido:required_(r.contenido,"contenido"),loteProduccion:required_(r.loteProduccion,"lote"),fechaProduccion:required_(r.fechaProduccion,"fecha de producción"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento")},common_(r)); }
-    else if(type==="MECHA DE SEGURIDAD") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); const ranges={bobina1Inicial1:number_(r.bobina1Inicial1,"serial"),bobina1Final1:number_(r.bobina1Final1,"serial"),bobina1Inicial2:optionalNumber_(r.bobina1Inicial2),bobina1Final2:optionalNumber_(r.bobina1Final2),bobina2Inicial1:number_(r.bobina2Inicial1,"serial"),bobina2Final1:number_(r.bobina2Final1,"serial"),bobina2Inicial2:optionalNumber_(r.bobina2Inicial2),bobina2Final2:optionalNumber_(r.bobina2Final2)}; range_(ranges.bobina1Inicial1,ranges.bobina1Final1);rangeOptional_(ranges.bobina1Inicial2,ranges.bobina1Final2);range_(ranges.bobina2Inicial1,ranges.bobina2Final1);rangeOptional_(ranges.bobina2Inicial2,ranges.bobina2Final2); item=Object.assign(base,{cajaNumero:caja,cantidad:number_(r.cantidad,"cantidad"),contenido:required_(r.contenido,"contenido"),fechaFabricacion:required_(r.fechaFabricacion,"fecha de fabricación"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento")},common_(r),ranges); }
+    if(type==="INDUGEL"||type==="ANFO") { const serial=number_(r.serial,"serial"); unique_(db.records[type],"serial",serial); const fabricacion=required_(r.fechaFabricacion,"fecha de fabricación"); const vencimiento=type==="INDUGEL"?addYear_(fabricacion):required_(r.fechaVencimiento,"fecha de vencimiento"); item=Object.assign(base,{serial:serial,fechaFabricacion:fabricacion,fechaVencimiento:vencimiento,movimientos:[]},common_(r)); }
+    else if(type==="DETONADORES") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); item=Object.assign(base,{cajaNumero:caja,contenido:required_(r.contenido,"contenido"),loteProduccion:required_(r.loteProduccion,"lote"),fechaProduccion:required_(r.fechaProduccion,"fecha de producción"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento"),movimientos:[]},common_(r)); }
+    else if(type==="MECHA DE SEGURIDAD") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); const ranges={bobina1Inicial1:number_(r.bobina1Inicial1,"serial"),bobina1Final1:number_(r.bobina1Final1,"serial"),bobina1Inicial2:optionalNumber_(r.bobina1Inicial2),bobina1Final2:optionalNumber_(r.bobina1Final2),bobina2Inicial1:number_(r.bobina2Inicial1,"serial"),bobina2Final1:number_(r.bobina2Final1,"serial"),bobina2Inicial2:optionalNumber_(r.bobina2Inicial2),bobina2Final2:optionalNumber_(r.bobina2Final2)}; range_(ranges.bobina1Inicial1,ranges.bobina1Final1);rangeOptional_(ranges.bobina1Inicial2,ranges.bobina1Final2);range_(ranges.bobina2Inicial1,ranges.bobina2Final1);rangeOptional_(ranges.bobina2Inicial2,ranges.bobina2Final2); item=Object.assign(base,{cajaNumero:caja,cantidad:number_(r.cantidad,"cantidad"),contenido:required_(r.contenido,"contenido"),fechaFabricacion:required_(r.fechaFabricacion,"fecha de fabricación"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento"),movimientos:[]},common_(r),ranges); }
     else { item=Object.assign(base,{fecha:required_(r.fecha,"fecha"),selloIndugel:number_(r.selloIndugel,"sello Indugel"),selloAnfo:number_(r.selloAnfo,"sello Anfo")}); }
     db.records[type].unshift(item); return {ok:true,id:item.id};
+  });
+}
+
+function move_(body,usuario) {
+  return locked_(function(db) {
+    const tipo=required_(body.tipo,"tipo"); if(tipo==="SELLOS"||!db.records[tipo])throw new Error("Tipo de material no válido.");
+    const item=db.records[tipo].find(x=>x.id===required_(body.id,"registro")); if(!item)throw new Error("Registro no encontrado.");
+    const destino=required_(body.ubicacion,"ubicación"); if(APP.locations.indexOf(destino)<0)throw new Error("Ubicación no válida."); if(item.ubicacion===destino)throw new Error("El material ya se encuentra en esa ubicación.");
+    item.movimientos=item.movimientos||[]; item.movimientos.unshift({fecha:iso_(),origen:item.ubicacion,destino:destino,usuario:usuario}); item.ubicacion=destino;
+    return {ok:true};
   });
 }
 
@@ -112,7 +123,8 @@ function userResetPassword_(b,a){requireAdmin_(a);return locked_(db=>{const u=db
 function userSetActive_(b,a){requireAdmin_(a);return locked_(db=>{const usuario=required_(b.usuario,"usuario").toLowerCase();if(usuario===a.usuario&&b.activo===false)throw new Error("No puedes desactivar tu propio acceso.");const u=db.users.find(x=>x.usuario===usuario);if(!u)throw new Error("Usuario no encontrado.");u.activo=b.activo===true;return {ok:true};});}
 
 function locked_(fn){const lock=LockService.getScriptLock();lock.waitLock(30000);try{const db=load_();const result=fn(db);save_(db);return result;}finally{lock.releaseLock();}}
-function common_(r){const ubicacion=required_(r.ubicacion,"ubicación");if(APP.locations.indexOf(ubicacion)<0)throw new Error("Ubicación no válida.");return {fechaIngreso:required_(r.fechaIngreso,"fecha de ingreso"),fechaMovimiento:required_(r.fechaMovimiento,"fecha del movimiento"),ubicacion:ubicacion};}
+function common_(r){const ubicacion=required_(r.ubicacion,"ubicación");if(APP.locations.indexOf(ubicacion)<0)throw new Error("Ubicación no válida.");return {fechaIngreso:required_(r.fechaIngreso,"fecha de ingreso"),ubicacion:ubicacion};}
+function addYear_(date){const parts=String(date).split("-");if(parts.length!==3)throw new Error("Fecha de fabricación no válida.");return String(Number(parts[0])+1)+"-"+parts[1]+"-"+parts[2];}
 function required_(v,l){const x=String(v==null?"":v).trim();if(!x)throw new Error("El campo "+l+" es obligatorio.");return x;}
 function number_(v,l){const x=Number(v);if(!Number.isFinite(x))throw new Error("El campo "+l+" debe ser numérico.");return x;}
 function optionalNumber_(v){return v===""||v==null?null:Number(v);}

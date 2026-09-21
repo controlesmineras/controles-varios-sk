@@ -41,3 +41,4 @@ export async function listUsers() { return (await request("usersList")).users; }
 export async function createUser(usuario: string, nombre: string, password: string, rol: string) { return request("userCreate", { usuario, nombre, password, rol }); }
 export async function resetUserPassword(usuario: string, password: string) { return request("userResetPassword", { usuario, password }); }
 export async function setUserActive(usuario: string, activo: boolean) { return request("userSetActive", { usuario, activo }); }
+export async function moveRecord(tipo: string, id: string, ubicacion: string) { return request("move", { tipo, id, ubicacion }); }

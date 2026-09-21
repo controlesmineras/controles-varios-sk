@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RecordDialog } from "@/components/record-dialog";
 import { AccessDialog } from "@/components/access-dialog";
-import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout } from "@/lib/backend";
+import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout, moveRecord } from "@/lib/backend";
 
 const modules = [
   { name: "INDUGEL", detail: "Seriales y ubicación", icon: Bomb, tone: "orange" },
@@ -61,6 +61,11 @@ export default function Home() {
     () => (records[selected] || []).filter((record) => JSON.stringify(record).toLowerCase().includes(query.toLowerCase())),
     [records, selected, query],
   );
+  async function transfer(record: Record<string, unknown>) {
+    const destination=record.ubicacion === "Polvorín superficie" ? "Polvorín interior de mina" : "Polvorín superficie";
+    if(!window.confirm(`¿Trasladar este material a ${destination}?`))return;
+    try{await moveRecord(selected,String(record.id),destination);await loadRecords();}catch(error){window.alert(error instanceof Error?error.message:"No se pudo registrar el movimiento.");}
+  }
 
   if (checking) return <div className="grid min-h-screen place-items-center bg-slate-50"><Loader2 className="h-7 w-7 animate-spin text-slate-500" /></div>;
   if (!backendConfigured()) return <ConnectionPending />;
@@ -84,6 +89,10 @@ export default function Home() {
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-7 sm:px-8 sm:py-10">
+        <section className="mb-7 flex flex-col gap-4 rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          <button type="button" onClick={()=>setSelected("SELLOS")} className="flex items-center gap-3 text-left"><span className="grid h-11 w-11 place-items-center rounded-xl bg-[#f5b51b] text-[#0d2c3e]"><ShieldCheck className="h-6 w-6"/></span><span><strong className="block">CONTROL DE SELLOS</strong><span className="text-sm text-slate-600">{records.SELLOS?.length || 0} registros de seguridad</span></span></button>
+          <RecordDialog initialType="SELLOS" onSaved={loadRecords} triggerLabel="REGISTRAR SELLOS" triggerClassName="h-10 bg-[#0d2c3e] px-5 text-xs font-semibold text-white hover:bg-[#16445d]" />
+        </section>
         <section className="mb-7 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
           <div>
             <p className="mb-1 text-sm font-medium uppercase tracking-[0.14em] text-slate-500">Inventario actual</p>
@@ -117,7 +126,7 @@ export default function Home() {
             </div>
             {selectedRecords.length === 0 ? <div className="grid min-h-56 place-items-center px-6 py-10 text-center">
               <div><Archive className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-3 font-medium">Aún no hay registros en {selected}</p><p className="mt-1 text-sm text-slate-500">El primer ingreso aparecerá aquí con su ubicación actual.</p></div>
-            </div> : <div className="divide-y divide-slate-100">{selectedRecords.map((record) => <article key={String(record.id)} className="grid gap-1 px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center"><div><p className="font-semibold">{String(record.serial || record.cajaNumero || `Registro ${record.id}`)}</p><p className="text-sm text-slate-500">{String(record.loteProduccion || record.contenido || "Registro individual")}</p></div><div className="mt-1 flex items-center gap-2 text-sm text-slate-600 sm:mt-0"><MapPin className="h-4 w-4" />{String(record.ubicacion || "")}</div></article>)}</div>}
+            </div> : <div className="divide-y divide-slate-100">{selectedRecords.map((record) => <article key={String(record.id)} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center"><div><p className="font-semibold">{String(record.serial || record.cajaNumero || `Registro ${record.id}`)}</p><p className="text-sm text-slate-500">{String(record.loteProduccion || record.contenido || "Registro individual")}</p>{selected!=="SELLOS"&&<p className="mt-1 text-xs text-slate-500">Ingreso: {String(record.fechaIngreso||"")} · Fabricación: {String(record.fechaFabricacion||record.fechaProduccion||"")} · Vencimiento: {String(record.fechaVencimiento||"")}</p>}</div>{selected!=="SELLOS"&&<div className="space-y-2 sm:text-right"><div className="flex items-center gap-2 text-sm text-slate-600 sm:justify-end"><MapPin className="h-4 w-4" />{String(record.ubicacion||"")}</div><Button variant="outline" size="sm" onClick={()=>void transfer(record)}>CAMBIAR UBICACIÓN</Button></div>}</article>)}</div>}
           </div>
 
           <aside className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -130,8 +139,6 @@ export default function Home() {
                 <div key={location} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"><span className="text-sm font-medium">{location}</span><span className="text-sm tabular-nums text-slate-500">{Object.values(records).flat().filter((record) => record.ubicacion === location).length}</span></div>
               ))}
             </div>
-            <Button variant="outline" onClick={() => setSelected("SELLOS")} className="mt-5 h-11 w-full border-slate-300"><ShieldCheck className="h-4 w-4" />CONTROL DE SELLOS</Button>
-            <RecordDialog initialType="SELLOS" onSaved={loadRecords} triggerLabel="REGISTRAR SELLOS" triggerClassName="mt-3 h-10 w-full bg-[#0d2c3e] text-xs font-semibold text-white hover:bg-[#16445d]" />
           </aside>
         </section>
       </div>
