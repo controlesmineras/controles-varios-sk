@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { saveRecord } from "@/lib/backend";
 
 const types = ["INDUGEL", "ANFO", "MECHA DE SEGURIDAD", "DETONADORES", "SELLOS"];
 
@@ -41,9 +42,7 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved }: { initialType
     event.preventDefault(); setSaving(true); setError("");
     const payload = Object.fromEntries(new FormData(event.currentTarget).entries());
     try {
-      const response = await fetch("/api/records", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...payload, tipo: type }) });
-      const result = await response.json() as { error?: string };
-      if (!response.ok) throw new Error(result.error || "No se pudo guardar el registro.");
+      await saveRecord({ ...payload, tipo: type });
       setOpen(false); onSaved?.();
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo guardar."); }
     finally { setSaving(false); }

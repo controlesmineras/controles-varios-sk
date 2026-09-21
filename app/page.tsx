@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Archive, Bomb, Cable, ChevronRight, MapPin, Search, ShieldCheck } from "lucide-react";
+import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { Archive, Bomb, Cable, ChevronRight, Loader2, LogOut, MapPin, Search, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RecordDialog } from "@/components/record-dialog";
+import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout } from "@/lib/backend";
 
 const modules = [
   { name: "INDUGEL", detail: "Seriales y ubicación", icon: Bomb, tone: "orange" },
@@ -14,16 +15,25 @@ const modules = [
 ] as const;
 
 export default function Home() {
+  const [authenticated, setAuthenticated] = useState(false);
+  const [needsBootstrap, setNeedsBootstrap] = useState(false);
+  const [checking, setChecking] = useState(true);
   const [selected, setSelected] = useState("INDUGEL");
   const [query, setQuery] = useState("");
   const [records, setRecords] = useState<Record<string, Array<Record<string, unknown>>>>({});
   const loadRecords = useCallback(async () => {
     try {
-      const response = await fetch("/api/records");
-      if (response.ok) setRecords(await response.json());
+      setRecords(await listRecords());
     } catch { /* la interfaz conserva un estado recuperable */ }
   }, []);
-  useEffect(() => { void loadRecords(); }, [loadRecords]);
+  useEffect(() => {
+    if (!backendConfigured()) { setChecking(false); return; }
+    getStatus().then((status) => {
+      setNeedsBootstrap(Boolean(status.needsBootstrap));
+      setAuthenticated(Boolean(status.authenticated));
+    }).finally(() => setChecking(false));
+  }, []);
+  useEffect(() => { if (authenticated) void loadRecords(); }, [authenticated, loadRecords]);
   useEffect(() => {
     const context = (document as Document & { modelContext?: { registerTool?: (tool: object, options?: { signal?: AbortSignal }) => void | Promise<void> } }).modelContext;
     if (!context?.registerTool) return;
@@ -49,6 +59,10 @@ export default function Home() {
     [records, selected, query],
   );
 
+  if (checking) return <div className="grid min-h-screen place-items-center bg-slate-50"><Loader2 className="h-7 w-7 animate-spin text-slate-500" /></div>;
+  if (!backendConfigured()) return <ConnectionPending />;
+  if (!authenticated) return <AccessForm bootstrap={needsBootstrap} onSuccess={() => { setAuthenticated(true); setNeedsBootstrap(false); }} />;
+
   return (
     <main className="min-h-screen bg-slate-50 text-slate-950">
       <header className="border-b border-slate-800 bg-[#0d2c3e] text-white">
@@ -62,7 +76,7 @@ export default function Home() {
               <p className="hidden text-xs text-slate-300 sm:block">Control de inventario y ubicación</p>
             </div>
           </div>
-          <RecordDialog initialType={selected} onSaved={loadRecords} />
+          <div className="flex items-center gap-2"><RecordDialog initialType={selected} onSaved={loadRecords} /><Button variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => { logout(); setAuthenticated(false); }}><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Cerrar sesión</span></Button></div>
         </div>
       </header>
 
@@ -119,4 +133,24 @@ export default function Home() {
       </div>
     </main>
   );
+}
+
+function ConnectionPending() {
+  return <main className="grid min-h-screen place-items-center bg-slate-50 px-5"><section className="max-w-lg rounded-2xl border bg-white p-8 text-center shadow-sm"><ShieldCheck className="mx-auto h-11 w-11 text-[#0d2c3e]" /><h1 className="mt-4 text-2xl font-semibold">Servidor empresarial pendiente</h1><p className="mt-2 text-slate-600">La interfaz ya está preparada. Falta agregar en <b>public/config.js</b> la URL de Google Apps Script para habilitar el acceso y los registros.</p></section></main>;
+}
+
+function AccessForm({ bootstrap, onSuccess }: { bootstrap: boolean; onSuccess: () => void }) {
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setSaving(true); setError("");
+    const data = Object.fromEntries(new FormData(event.currentTarget).entries());
+    try {
+      if (bootstrap) await createInitialAdmin(String(data.usuario), String(data.nombre), String(data.password));
+      else await login(String(data.usuario), String(data.password));
+      onSuccess();
+    } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo iniciar sesión."); }
+    finally { setSaving(false); }
+  }
+  return <main className="grid min-h-screen place-items-center bg-slate-50 px-5"><section className="w-full max-w-md rounded-2xl border bg-white p-7 shadow-sm"><div className="text-center"><span className="mx-auto grid h-12 w-12 place-items-center rounded-xl bg-[#f5b51b]"><ShieldCheck className="h-7 w-7 text-[#0d2c3e]" /></span><h1 className="mt-4 text-2xl font-semibold">CONTROL EXPLOSIVOS SK</h1><p className="mt-1 text-sm text-slate-500">{bootstrap ? "Crear administrador inicial" : "INICIAR SESIÓN"}</p></div><form onSubmit={submit} className="mt-6 space-y-4">{bootstrap && <label className="block text-sm font-medium">NOMBRE COMPLETO<Input name="nombre" required className="mt-1.5" /></label>}<label className="block text-sm font-medium">USUARIO<Input name="usuario" required autoComplete="username" className="mt-1.5" /></label><label className="block text-sm font-medium">CONTRASEÑA<Input name="password" type="password" required minLength={8} autoComplete={bootstrap ? "new-password" : "current-password"} className="mt-1.5" /></label>{error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}<Button className="h-11 w-full bg-[#0d2c3e]" disabled={saving}>{saving && <Loader2 className="h-4 w-4 animate-spin" />}{bootstrap ? "CREAR ADMINISTRADOR" : "INGRESAR"}</Button></form></section></main>;
 }
