@@ -62,7 +62,7 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
         <div className="grid gap-4 sm:grid-cols-2" key={type}>
           {(type === "INDUGEL" || type === "ANFO") && <><Field name="serial" label="SERIAL" type="number" /><AutoExpiryDates/><CommonFields /></>}
           {type === "DETONADORES" && <><Field name="cajaNumero" label="CAJA No." /><Field name="contenido" label="CONTENIDO" /><Field name="loteProduccion" label="LOTE DE PRODUCCIÓN" /><Field name="fechaProduccion" label="FECHA DE PRODUCCIÓN" type="date" /><Field name="fechaVencimiento" label="FECHA DE VENCIMIENTO" type="date" /><CommonFields /></>}
-          {type === "MECHA DE SEGURIDAD" && <><Field name="cajaNumero" label="CAJA No." /><Field name="cantidad" label="CANTIDAD" type="number" /><Field name="contenido" label="CONTENIDO" /><Field name="fechaFabricacion" label="FECHA DE FABRICACIÓN" type="date" /><Field name="fechaVencimiento" label="FECHA DE VENCIMIENTO" type="date" /><CommonFields /><Bobina number={1} /><Bobina number={2} /></>}
+          {type === "MECHA DE SEGURIDAD" && <><Field name="cajaNumero" label="CAJA No." /><Field name="cantidad" label="CANTIDAD" type="number" /><Field name="contenido" label="CONTENIDO" /><AutoExpiryDates/><CommonFields /><Bobina number={1} /><Bobina number={2} /></>}
           {type === "SELLOS" && <><Field name="fecha" label="FECHA" type="date" /><Field name="selloIndugel" label="SELLO DE SEGURIDAD INDUGEL" type="number" /><Field name="selloAnfo" label="SELLO DE SEGURIDAD ANFO" type="number" /></>}
         </div>
         {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
