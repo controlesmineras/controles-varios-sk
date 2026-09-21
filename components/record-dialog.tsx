@@ -24,7 +24,7 @@ function CommonFields() {
 }
 
 function localToday(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
-function FechaIngreso(){const [mode,setMode]=useState<"HOY"|"OTRA">("HOY");const [date,setDate]=useState(localToday);return <fieldset className="space-y-2 sm:col-span-2"><legend className="text-sm font-medium">FECHA DE INGRESO</legend><div className="grid grid-cols-2 rounded-lg border bg-slate-100 p-1"><button type="button" onClick={()=>{setMode("HOY");setDate(localToday());}} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode==="HOY"?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>HOY</button><button type="button" onClick={()=>{setMode("OTRA");setDate(localToday());}} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode==="OTRA"?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>OTRA</button></div><input type="hidden" name="fechaIngreso" value={date}/>{mode==="OTRA"&&<Input type="date" value={date} onChange={e=>setDate(e.target.value)} required/>}</fieldset>}
+function FechaIngreso(){const [mode,setMode]=useState<"HOY"|"OTRA">("HOY");const [date,setDate]=useState(localToday);return <fieldset className="space-y-2 sm:col-span-2"><legend className="text-sm font-medium">FECHA DE INGRESO</legend><div className="grid grid-cols-2 rounded-lg border bg-slate-100 p-1"><button type="button" onClick={()=>{setMode("HOY");setDate(localToday());}} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode==="HOY"?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>HOY</button><button type="button" onClick={()=>{setMode("OTRA");setDate(localToday());}} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode==="OTRA"?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>OTRA</button></div><input type="hidden" name="fechaIngreso" value={date} required/>{mode==="OTRA"&&<Input type="date" value={date} onChange={e=>setDate(e.target.value)} required/>}</fieldset>}
 
 function AutoExpiryDates() {
   const [fabricacion,setFabricacion]=useState(""); const [vencimiento,setVencimiento]=useState("");
@@ -35,7 +35,7 @@ function AutoExpiryDates() {
 function Bobina({ number }: { number: 1 | 2 }) {
   return <fieldset className="sm:col-span-2 rounded-xl border border-slate-200 p-4"><legend className="px-2 text-sm font-semibold">BOBINA {number}</legend><div className="grid gap-3 sm:grid-cols-2">
     <Field name={`bobina${number}Inicial1`} label="SERIAL INICIAL 1" type="number" /><Field name={`bobina${number}Final1`} label="SERIAL FINAL 1" type="number" />
-    <Field name={`bobina${number}Inicial2`} label="SERIAL INICIAL 2" type="number" required={false} /><Field name={`bobina${number}Final2`} label="SERIAL FINAL 2" type="number" required={false} />
+    <Field name={`bobina${number}Inicial2`} label="SERIAL INICIAL 2" type="number" /><Field name={`bobina${number}Final2`} label="SERIAL FINAL 2" type="number" />
   </div></fieldset>;
 }
 
