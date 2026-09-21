@@ -72,6 +72,7 @@ export default function Home() {
     () => (records[selected] || []).filter((record) => JSON.stringify(record).toLowerCase().includes(query.toLowerCase())).filter(record=>!dateFilter||String(record.fechaIngreso||record.fecha||"").slice(0,10)===dateFilter).filter(record=>verificationFilter==="TODOS"||(verificationFilter==="VERIFICADOS"?record.verificado!==false:record.verificado===false)),
     [records, selected, query,dateFilter,verificationFilter],
   );
+  const latestPrecinto = records.SELLOS?.[0];
 
   if (checking) return <div className="grid min-h-screen place-items-center bg-slate-50"><Loader2 className="h-7 w-7 animate-spin text-slate-500" /></div>;
   if (!backendConfigured()) return <ConnectionPending />;
@@ -96,8 +97,14 @@ export default function Home() {
 
       <div className="mx-auto max-w-6xl px-4 py-7 sm:px-8 sm:py-10">
         <section className="mb-7 flex flex-col gap-4 rounded-2xl border border-amber-200 bg-amber-50 p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
-          <button type="button" onClick={()=>setSelected("SELLOS")} className="flex items-center gap-3 text-left"><span className="grid h-11 w-11 place-items-center rounded-xl bg-[#f5b51b] text-[#0d2c3e]"><ShieldCheck className="h-6 w-6"/></span><span><strong className="block">CONTROL DE SELLOS</strong><span className="text-sm text-slate-600">{records.SELLOS?.length || 0} registros de seguridad</span></span></button>
-          <RecordDialog initialType="SELLOS" onSaved={loadRecords} triggerLabel="REGISTRAR SELLOS" triggerClassName="h-10 bg-[#0d2c3e] px-5 text-xs font-semibold text-white hover:bg-[#16445d]" />
+          <div className="grid gap-4 sm:grid-cols-[auto_1fr] sm:items-center">
+            <button type="button" onClick={()=>setSelected("SELLOS")} className="flex items-center gap-3 text-left"><span className="grid h-11 w-11 place-items-center rounded-xl bg-[#f5b51b] text-[#0d2c3e]"><ShieldCheck className="h-6 w-6"/></span><span><strong className="block">CONTROL DE PRECINTOS</strong><span className="text-sm text-slate-600">{records.SELLOS?.length || 0} registros de seguridad</span></span></button>
+            <div className="grid grid-cols-2 gap-2" aria-label="Últimos precintos registrados">
+              <div className="rounded-xl border border-amber-200 bg-white px-4 py-3"><span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">PRECINTO INDUGEL</span><strong className="mt-1 block text-xl tabular-nums text-[#0d2c3e]">{String(latestPrecinto?.selloIndugel ?? "—")}</strong></div>
+              <div className="rounded-xl border border-amber-200 bg-white px-4 py-3"><span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">PRECINTO ANFO</span><strong className="mt-1 block text-xl tabular-nums text-[#0d2c3e]">{String(latestPrecinto?.selloAnfo ?? "—")}</strong></div>
+            </div>
+          </div>
+          <RecordDialog initialType="SELLOS" onSaved={loadRecords} triggerLabel="REGISTRAR PRECINTOS" triggerClassName="h-10 bg-[#0d2c3e] px-5 text-xs font-semibold text-white hover:bg-[#16445d]" />
         </section>
         <section className="mb-7 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
           <div>
@@ -127,11 +134,11 @@ export default function Home() {
         <section className="mt-7 grid gap-5 lg:grid-cols-[1.55fr_0.75fr]">
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-              <div><h2 className="text-lg font-semibold">{selected}</h2><p className="text-sm text-slate-500">Registros disponibles</p></div>
+              <div><h2 className="text-lg font-semibold">{selected === "SELLOS" ? "PRECINTOS" : selected}</h2><p className="text-sm text-slate-500">Registros disponibles</p></div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">{selectedRecords.length} registros</span>
             </div>
             {selectedRecords.length === 0 ? <div className="grid min-h-56 place-items-center px-6 py-10 text-center">
-              <div><Archive className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-3 font-medium">Aún no hay registros en {selected}</p><p className="mt-1 text-sm text-slate-500">El primer ingreso aparecerá aquí con su ubicación actual.</p></div>
+              <div><Archive className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-3 font-medium">Aún no hay registros en {selected === "SELLOS" ? "PRECINTOS" : selected}</p><p className="mt-1 text-sm text-slate-500">El primer ingreso aparecerá aquí con su ubicación actual.</p></div>
             </div> : <div className="divide-y divide-slate-100">{selectedRecords.map((record) => <article key={String(record.id)} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{String(record.serial || record.cajaNumero || `Registro ${record.id}`)}</p>{record.verificado===false&&<span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">PENDIENTE DE VERIFICAR</span>}</div><p className="text-sm text-slate-500">{String(record.loteProduccion || record.contenido || "Registro individual")}</p>{selected!=="SELLOS"&&<p className="mt-1 text-xs text-slate-500">Ingreso: {String(record.fechaIngreso||"")} · Fabricación: {String(record.fechaFabricacion||record.fechaProduccion||"")} · Vencimiento: {String(record.fechaVencimiento||"")}</p>}</div>{selected!=="SELLOS"&&<div className="flex items-center gap-2 text-sm text-slate-600 sm:justify-end"><MapPin className="h-4 w-4" />{String(record.ubicacion||"")}</div>}</article>)}</div>}
           </div>
 
