@@ -23,6 +23,7 @@ function doPost(e) {
     const user = requireSession_(body.token);
     if (action === "list") return json_({ ok: true, records: publicRecords_(load_()) });
     if (action === "create") return json_(create_(body.record || {}, user.usuario));
+    if (action === "createBatch") return json_(createBatch_(body.batch || {}, user.usuario));
     if (action === "move") return json_(move_(body, user.usuario));
     if (action === "usersList") return json_(usersList_(user));
     if (action === "userCreate") return json_(userCreate_(body, user));
@@ -103,6 +104,24 @@ function create_(r,usuario) {
     else if(type==="MECHA DE SEGURIDAD") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); const ranges={bobina1Inicial1:number_(r.bobina1Inicial1,"serial"),bobina1Final1:number_(r.bobina1Final1,"serial"),bobina1Inicial2:optionalNumber_(r.bobina1Inicial2),bobina1Final2:optionalNumber_(r.bobina1Final2),bobina2Inicial1:number_(r.bobina2Inicial1,"serial"),bobina2Final1:number_(r.bobina2Final1,"serial"),bobina2Inicial2:optionalNumber_(r.bobina2Inicial2),bobina2Final2:optionalNumber_(r.bobina2Final2)}; range_(ranges.bobina1Inicial1,ranges.bobina1Final1);rangeOptional_(ranges.bobina1Inicial2,ranges.bobina1Final2);range_(ranges.bobina2Inicial1,ranges.bobina2Final1);rangeOptional_(ranges.bobina2Inicial2,ranges.bobina2Final2); item=Object.assign(base,{cajaNumero:caja,cantidad:number_(r.cantidad,"cantidad"),contenido:required_(r.contenido,"contenido"),fechaFabricacion:required_(r.fechaFabricacion,"fecha de fabricación"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento"),movimientos:[]},common_(r),ranges); }
     else { item=Object.assign(base,{fecha:required_(r.fecha,"fecha"),selloIndugel:number_(r.selloIndugel,"sello Indugel"),selloAnfo:number_(r.selloAnfo,"sello Anfo")}); }
     db.records[type].unshift(item); return {ok:true,id:item.id};
+  });
+}
+
+function createBatch_(r,usuario) {
+  return locked_(function(db) {
+    const type=required_(r.tipo,"tipo"); if(type!=="INDUGEL"&&type!=="ANFO")throw new Error("El ingreso por rangos solo está disponible para INDUGEL y ANFO.");
+    if(!Array.isArray(r.rangos)||!r.rangos.length)throw new Error("Debes agregar al menos un rango de seriales.");
+    const fabricacion=required_(r.fechaFabricacion,"fecha de fabricación"); const vencimiento=required_(r.fechaVencimiento,"fecha de vencimiento"); const common=common_(r);
+    const seriales=[]; const vistos={};
+    r.rangos.forEach(function(rango,index){
+      if(rango.verificado!==true)throw new Error("Debes verificar las fechas del rango "+(index+1)+".");
+      const desde=number_(rango.desde,"serial inicial del rango "+(index+1)); const hasta=number_(rango.hasta,"serial final del rango "+(index+1)); range_(desde,hasta);
+      if(hasta-desde+1>5000)throw new Error("Un rango no puede contener más de 5.000 seriales.");
+      for(let serial=desde;serial<=hasta;serial++){if(vistos[serial])throw new Error("El serial "+serial+" está repetido entre los rangos.");vistos[serial]=true;seriales.push(serial);}
+    });
+    const existentes={}; db.records[type].forEach(function(item){existentes[item.serial]=true;}); const repetido=seriales.find(function(serial){return existentes[serial];}); if(repetido!==undefined)throw new Error("El serial "+repetido+" ya existe y no se guardó ningún registro.");
+    const fechaRegistro=iso_(); const lote=Utilities.getUuid(); const items=seriales.map(function(serial){return Object.assign({id:Utilities.getUuid(),fechaRegistro:fechaRegistro,usuario:usuario,serial:serial,fechaFabricacion:fabricacion,fechaVencimiento:vencimiento,movimientos:[],loteIngreso:lote},common);});
+    db.records[type]=items.concat(db.records[type]); return {ok:true,cantidad:items.length,loteIngreso:lote};
   });
 }
 
