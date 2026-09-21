@@ -79,7 +79,7 @@ export default function Home() {
               <p className="hidden text-xs text-slate-300 sm:block">Control de inventario y ubicación</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">{currentUser?.rol === "ADMINISTRADOR" && <AccessDialog/>}<RecordDialog initialType={selected} onSaved={loadRecords} /><Button variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => { logout(); setAuthenticated(false); setCurrentUser(null); }}><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Cerrar sesión</span></Button></div>
+          <div className="flex items-center gap-2">{currentUser?.rol === "ADMINISTRADOR" && <AccessDialog/>}<Button variant="ghost" className="text-white hover:bg-white/10 hover:text-white" onClick={() => { logout(); setAuthenticated(false); setCurrentUser(null); }}><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Cerrar sesión</span></Button></div>
         </div>
       </header>
 
@@ -87,7 +87,8 @@ export default function Home() {
         <section className="mb-7 grid gap-4 sm:grid-cols-[1fr_auto] sm:items-end">
           <div>
             <p className="mb-1 text-sm font-medium uppercase tracking-[0.14em] text-slate-500">Inventario actual</p>
-            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">Explosivos y accesorios</h1>
+            <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">EXPLOSIVOS Y ACCESORIOS</h1>
+            <div className="mt-4"><RecordDialog initialType={selected} onSaved={loadRecords} /></div>
           </div>
           <label className="relative block min-w-64">
             <span className="sr-only">Buscar registros</span>
