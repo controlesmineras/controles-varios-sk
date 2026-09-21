@@ -14,6 +14,11 @@ const APP = Object.freeze({
 
 function doGet() { return json_({ ok: true, servicio: "CONTROL EXPLOSIVOS SK" }); }
 
+function configurarSistema() {
+  ensureSheets_();
+  SpreadsheetApp.getActive().toast("Las hojas quedaron creadas correctamente.", "CONTROL EXPLOSIVOS SK", 5);
+}
+
 function doPost(e) {
   try {
     ensureSheets_();
