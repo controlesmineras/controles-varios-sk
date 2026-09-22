@@ -14,9 +14,18 @@ function Field({ name, label, type = "text", required = true }: { name: string; 
   return <div className="space-y-1.5"><Label htmlFor={name}>{label}</Label><Input id={name} name={name} type={type} required={required} inputMode={type === "number" ? "numeric" : undefined} /></div>;
 }
 
-function CommonFields() {
+type EntryDateProps = {
+  date: string;
+  mode: "HOY" | "OTRA";
+  keep: boolean;
+  onDateChange: (value: string) => void;
+  onModeChange: (value: "HOY" | "OTRA") => void;
+  onKeepChange: (value: boolean) => void;
+};
+
+function CommonFields(props: EntryDateProps) {
   return <>
-    <FechaIngreso />
+    <FechaIngreso {...props} />
     <div className="space-y-1.5 sm:col-span-2"><Label htmlFor="ubicacion">UBICACIÓN</Label><select id="ubicacion" name="ubicacion" required className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm">
       <option value="">Seleccionar ubicación</option><option>Polvorín superficie</option><option>Polvorín interior de mina</option>
     </select></div>
@@ -24,12 +33,20 @@ function CommonFields() {
 }
 
 function localToday(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;}
-function FechaIngreso(){const [mode,setMode]=useState<"HOY"|"OTRA">("HOY");const [date,setDate]=useState(localToday);return <fieldset className="space-y-2 sm:col-span-2"><legend className="text-sm font-medium">FECHA DE INGRESO</legend><div className="grid grid-cols-2 rounded-lg border bg-slate-100 p-1"><button type="button" onClick={()=>{setMode("HOY");setDate(localToday());}} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode==="HOY"?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>HOY</button><button type="button" onClick={()=>{setMode("OTRA");setDate(localToday());}} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode==="OTRA"?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>OTRA</button></div><input type="hidden" name="fechaIngreso" value={date} required/>{mode==="OTRA"&&<Input type="date" value={date} onChange={e=>setDate(e.target.value)} required/>}</fieldset>}
+function FechaIngreso({date,mode,keep,onDateChange,onModeChange,onKeepChange}:EntryDateProps){return <fieldset className="space-y-2 sm:col-span-2"><div className="flex items-center justify-between gap-3"><legend className="text-sm font-medium">FECHA DE INGRESO</legend><label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={keep} onChange={e=>onKeepChange(e.target.checked)} className="h-4 w-4 accent-[#0d2c3e]"/>CONSERVAR FECHA</label></div><div className="grid grid-cols-2 rounded-lg border bg-slate-100 p-1"><button type="button" onClick={()=>{onModeChange("HOY");onDateChange(localToday());}} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode==="HOY"?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>HOY</button><button type="button" onClick={()=>{onModeChange("OTRA");onDateChange(date||localToday());}} className={`rounded-md px-3 py-2 text-sm font-semibold ${mode==="OTRA"?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>OTRA</button></div><input type="hidden" name="fechaIngreso" value={date} required/>{mode==="OTRA"&&<Input type="date" value={date} onChange={e=>onDateChange(e.target.value)} required/>}</fieldset>}
 
-function AutoExpiryDates() {
-  const [fabricacion,setFabricacion]=useState(""); const [vencimiento,setVencimiento]=useState("");
-  function changeFabricacion(value:string){setFabricacion(value);setVencimiento(value?`${Number(value.slice(0,4))+1}${value.slice(4)}`:"");}
-  return <><div className="space-y-1.5"><Label htmlFor="fechaFabricacion">FECHA DE FABRICACIÓN</Label><Input id="fechaFabricacion" name="fechaFabricacion" type="date" required value={fabricacion} onChange={e=>changeFabricacion(e.target.value)}/></div><div className="space-y-1.5"><Label htmlFor="fechaVencimiento">FECHA DE VENCIMIENTO</Label><Input id="fechaVencimiento" name="fechaVencimiento" type="date" required value={vencimiento} onChange={e=>setVencimiento(e.target.value)}/><p className="text-xs text-slate-500">Sugerida automáticamente: fabricación + 1 año. Puede corregirse.</p></div></>;
+type ManufacturingDateProps = {
+  fabricacion: string;
+  vencimiento: string;
+  keep: boolean;
+  onFabricacionChange: (value: string) => void;
+  onVencimientoChange: (value: string) => void;
+  onKeepChange: (value: boolean) => void;
+};
+
+function AutoExpiryDates({fabricacion,vencimiento,keep,onFabricacionChange,onVencimientoChange,onKeepChange}:ManufacturingDateProps) {
+  function changeFabricacion(value:string){onFabricacionChange(value);onVencimientoChange(value?`${Number(value.slice(0,4))+1}${value.slice(4)}`:"");}
+  return <><div className="space-y-1.5"><div className="flex items-center justify-between gap-3"><Label htmlFor="fechaFabricacion">FECHA DE FABRICACIÓN</Label><label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-600"><input type="checkbox" checked={keep} onChange={e=>onKeepChange(e.target.checked)} className="h-4 w-4 accent-[#0d2c3e]"/>CONSERVAR FECHA</label></div><Input id="fechaFabricacion" name="fechaFabricacion" type="date" required value={fabricacion} onChange={e=>changeFabricacion(e.target.value)}/></div><div className="space-y-1.5"><Label htmlFor="fechaVencimiento">FECHA DE VENCIMIENTO</Label><Input id="fechaVencimiento" name="fechaVencimiento" type="date" required value={vencimiento} onChange={e=>onVencimientoChange(e.target.value)}/><p className="text-xs text-slate-500">Sugerida automáticamente: fabricación + 1 año. Puede corregirse.</p></div></>;
 }
 
 function BatchRanges({ count, setCount }: { count: number; setCount: (value: number) => void }) {
@@ -60,8 +77,16 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
   const [error, setError] = useState("");
   const [batchMode,setBatchMode]=useState(false);
   const [rangeCount,setRangeCount]=useState(1);
+  const [entryDate,setEntryDate]=useState(localToday);
+  const [entryDateMode,setEntryDateMode]=useState<"HOY"|"OTRA">("HOY");
+  const [keepEntryDate,setKeepEntryDate]=useState(false);
+  const [manufacturingDate,setManufacturingDate]=useState("");
+  const [expiryDate,setExpiryDate]=useState("");
+  const [keepManufacturingDate,setKeepManufacturingDate]=useState(false);
   useEffect(() => setType(initialType), [initialType]);
   const choices=initialType==="SELLOS"?["SELLOS"]:materialTypes;
+  const entryDateProps:EntryDateProps={date:entryDate,mode:entryDateMode,keep:keepEntryDate,onDateChange:setEntryDate,onModeChange:setEntryDateMode,onKeepChange:setKeepEntryDate};
+  const manufacturingDateProps:ManufacturingDateProps={fabricacion:manufacturingDate,vencimiento:expiryDate,keep:keepManufacturingDate,onFabricacionChange:setManufacturingDate,onVencimientoChange:setExpiryDate,onKeepChange:setKeepManufacturingDate};
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError("");
@@ -73,6 +98,8 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
         const rangos=Array.from({length:rangeCount},(_,index)=>({desde:form.get(`rangoDesde${index}`),hasta:form.get(`rangoHasta${index}`)}));
         result=await saveBatchRecords({tipo:type,fechaFabricacion:payload.fechaFabricacion,fechaVencimiento:payload.fechaVencimiento,fechaIngreso:payload.fechaIngreso,ubicacion:payload.ubicacion,rangos});
       }else result=await saveRecord({ ...payload, tipo: type });
+      if(!keepEntryDate){setEntryDate(localToday());setEntryDateMode("HOY");}
+      if(!keepManufacturingDate){setManufacturingDate("");setExpiryDate("");}
       setOpen(false); onSaved?.(result);
     } catch (cause) { setError(cause instanceof Error ? cause.message : "No se pudo guardar."); }
     finally { setSaving(false); }
@@ -86,9 +113,9 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
         {choices.length>1&&<div className="space-y-2"><Label>TIPO DE MATERIAL</Label><div className="grid gap-2 sm:grid-cols-2">{choices.map(value=><button key={value} type="button" onClick={()=>{setType(value);setBatchMode(false);setRangeCount(1);}} className={`rounded-lg border px-3 py-3 text-sm font-semibold ${type===value?"border-[#f5b51b] bg-amber-50 text-[#0d2c3e]":"bg-white text-slate-600"}`}>{value}</button>)}</div></div>}
         {(type==="INDUGEL"||type==="ANFO")&&<div className="grid grid-cols-2 rounded-lg border bg-slate-100 p-1"><button type="button" onClick={()=>setBatchMode(false)} className={`rounded-md px-3 py-2 text-sm font-semibold ${!batchMode?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>INGRESO INDIVIDUAL</button><button type="button" onClick={()=>setBatchMode(true)} className={`rounded-md px-3 py-2 text-sm font-semibold ${batchMode?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>INGRESO POR CANTIDAD</button></div>}
         <div className="grid gap-4 sm:grid-cols-2" key={type}>
-          {(type === "INDUGEL" || type === "ANFO") && <>{batchMode?<BatchRanges count={rangeCount} setCount={setRangeCount}/>:<Field name="serial" label="SERIAL" type="number" />}<AutoExpiryDates/><CommonFields /></>}
-          {type === "DETONADORES" && <><Field name="cajaNumero" label="CAJA No." /><Field name="contenido" label="CONTENIDO" /><Field name="loteProduccion" label="LOTE DE PRODUCCIÓN" /><Field name="fechaProduccion" label="FECHA DE PRODUCCIÓN" type="date" /><Field name="fechaVencimiento" label="FECHA DE VENCIMIENTO" type="date" /><CommonFields /></>}
-          {type === "MECHA DE SEGURIDAD" && <><Field name="cajaNumero" label="CAJA No." /><Field name="cantidad" label="CANTIDAD" type="number" /><Field name="contenido" label="CONTENIDO" /><AutoExpiryDates/><CommonFields /><Bobina number={1} /><Bobina number={2} /></>}
+          {(type === "INDUGEL" || type === "ANFO") && <>{batchMode?<BatchRanges count={rangeCount} setCount={setRangeCount}/>:<Field name="serial" label="SERIAL" type="number" />}<AutoExpiryDates {...manufacturingDateProps}/><CommonFields {...entryDateProps}/></>}
+          {type === "DETONADORES" && <><Field name="cajaNumero" label="CAJA No." /><Field name="contenido" label="CONTENIDO" /><Field name="loteProduccion" label="LOTE DE PRODUCCIÓN" /><Field name="fechaProduccion" label="FECHA DE PRODUCCIÓN" type="date" /><Field name="fechaVencimiento" label="FECHA DE VENCIMIENTO" type="date" /><CommonFields {...entryDateProps}/></>}
+          {type === "MECHA DE SEGURIDAD" && <><Field name="cajaNumero" label="CAJA No." /><Field name="cantidad" label="CANTIDAD" type="number" /><Field name="contenido" label="CONTENIDO" /><AutoExpiryDates {...manufacturingDateProps}/><CommonFields {...entryDateProps}/><Bobina number={1} /><Bobina number={2} /></>}
           {type === "SELLOS" && <><Field name="fecha" label="FECHA" type="date" /><Field name="selloIndugel" label="PRECINTO INDUGEL" /><Field name="selloAnfo" label="PRECINTO ANFO" /></>}
         </div>
         {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
