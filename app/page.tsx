@@ -19,24 +19,27 @@ const modules = [
 ] as const;
 
 const formatNumber=(value:number)=>new Intl.NumberFormat("es-CO").format(value);
-const formatDecimal=(value:number)=>new Intl.NumberFormat("es-CO",{maximumFractionDigits:2}).format(value);
-function inventoryMeasure(material:string,count:number,detailed:boolean){
+function inventoryMeasure(material:string,count:number,view:number){
   if(material==="INDUGEL"){
-    if(detailed)return `${formatNumber(count)} ${count===1?"barra":"barras"}`;
-    const boxes=count/154;
-    return `${formatDecimal(boxes)} ${boxes===1?"caja":"cajas"}`;
+    if(view===1)return `${formatNumber(count*154)} barras`;
+    return `${formatNumber(count)} ${count===1?"caja":"cajas"}`;
   }
   if(material==="ANFO")return `${formatNumber(count)} ${count===1?"bulto":"bultos"}`;
-  if(material==="MECHA DE SEGURIDAD")return detailed?`${formatNumber(count*500)} metros`:`${formatNumber(count)} ${count===1?"caja":"cajas"}`;
-  if(material==="DETONADORES")return detailed?`${formatNumber(count*10000)} detonadores`:`${formatNumber(count)} ${count===1?"caja":"cajas"}`;
+  if(material==="MECHA DE SEGURIDAD")return view===1?`${formatNumber(count*500)} metros`:`${formatNumber(count)} ${count===1?"caja":"cajas"}`;
+  if(material==="DETONADORES"){
+    if(view===1)return `${formatNumber(count*100)} cajas`;
+    if(view===2)return `${formatNumber(count*10000)} detonadores`;
+    return `${formatNumber(count)} ${count===1?"cartón":"cartones"}`;
+  }
   return formatNumber(count);
 }
-function measureHint(material:string,detailed:boolean){
+function measureHint(material:string,view:number){
   if(material==="ANFO")return "Ingreso por bultos";
-  if(detailed)return "Tocar para ver por cajas";
-  if(material==="INDUGEL")return "Tocar para ver barras";
-  if(material==="MECHA DE SEGURIDAD")return "Tocar para ver metros";
-  return "Tocar para ver detonadores";
+  if(material==="INDUGEL")return view===0?"Tocar para ver barras":"Tocar para ver cajas";
+  if(material==="MECHA DE SEGURIDAD")return view===0?"Tocar para ver metros":"Tocar para ver cajas";
+  if(view===0)return "Tocar para ver cajas";
+  if(view===1)return "Tocar para ver detonadores";
+  return "Tocar para ver cartones";
 }
 
 function MaterialIcon({name}:{name:string}){
@@ -56,7 +59,7 @@ export default function Home() {
   const [dateFilter,setDateFilter]=useState("");
   const [verificationFilter,setVerificationFilter]=useState("TODOS");
   const [verificationSignal,setVerificationSignal]=useState(0);
-  const [detailedMaterials,setDetailedMaterials]=useState<Record<string,boolean>>({});
+  const [materialViews,setMaterialViews]=useState<Record<string,number>>({});
   const [syncState,setSyncState]=useState<"idle"|"syncing"|"success"|"error">("idle");
   const [lastSync,setLastSync]=useState("");
   const [pendingSync,setPendingSync]=useState(0);
@@ -159,21 +162,21 @@ export default function Home() {
             const available=(records[name]||[]).filter(record=>record.verificado!==false);
             const interior=available.filter(record=>record.ubicacion==="Polvorín interior de mina").length;
             const surface=available.filter(record=>record.ubicacion==="Polvorín superficie").length;
-            const detailed=Boolean(detailedMaterials[name]);
+            const view=materialViews[name]||0;
             return (
             <div key={name} className={`relative rounded-2xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected === name ? "border-[#f5b51b] ring-2 ring-[#f5b51b]/20" : "border-slate-200"}`}>
-              <button type="button" onClick={() => {setSelected(name);if(name!=="ANFO")setDetailedMaterials(current=>({...current,[name]:!current[name]}));}} className="group flex w-full items-start gap-3 text-left" aria-label={`${name}. ${measureHint(name,detailed)}`}>
-                <span className={`module-icon module-icon-${tone} shrink-0`}><MaterialIcon name={name}/></span>
+              <button type="button" onClick={() => {setSelected(name);if(name!=="ANFO")setMaterialViews(current=>({...current,[name]:(view+1)%(name==="DETONADORES"?3:2)}));}} className="group block w-full text-left" aria-label={`${name}. ${measureHint(name,view)}`}>
                 {name==="DETONADORES"&&<span title="Material de manejo especial" className="absolute right-4 top-4 grid h-7 w-7 place-items-center rounded-full bg-yellow-100 text-yellow-700"><AlertTriangle className="h-4 w-4" aria-label="Precaución"/></span>}
-                <span className="min-w-0 flex-1">
-                  <span className="flex items-center justify-between gap-2 pr-5 text-base font-bold leading-tight">{name}<ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:translate-x-1" /></span>
-                  <span className="mt-3 grid gap-1.5 text-xs text-slate-600">
-                    <span className="flex items-start justify-between gap-2"><span className="font-semibold uppercase tracking-wide text-slate-500">Total</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,available.length,detailed)}</strong></span>
-                    <span className="flex items-start justify-between gap-2"><span>Polvorín</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,interior,detailed)}</strong></span>
-                    <span className="flex items-start justify-between gap-2"><span>Almacén</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,surface,detailed)}</strong></span>
-                    <span className="mt-1 border-t border-slate-100 pt-2 text-[10px] font-medium text-slate-400">{measureHint(name,detailed)}</span>
+                <span className="flex items-center justify-between gap-2 pr-7 text-base font-bold leading-tight">{name}<ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:translate-x-1" /></span>
+                <span className="mt-3 grid grid-cols-[4.5rem_1fr] items-stretch gap-3">
+                  <span className={`module-icon module-icon-${tone}`}><MaterialIcon name={name}/></span>
+                  <span className="grid content-center gap-1.5 text-xs text-slate-600">
+                    <span className="flex items-start justify-between gap-2"><span className="font-semibold uppercase tracking-wide text-slate-500">Total</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,available.length,view)}</strong></span>
+                    <span className="flex items-start justify-between gap-2"><span>Polvorín</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,interior,view)}</strong></span>
+                    <span className="flex items-start justify-between gap-2"><span>Almacén</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,surface,view)}</strong></span>
                   </span>
                 </span>
+                <span className="mt-3 block border-t border-slate-100 pt-2 text-[10px] font-medium text-slate-400">{measureHint(name,view)}</span>
               </button>
             </div>
           )})}
