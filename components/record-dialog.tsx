@@ -9,6 +9,12 @@ import { Label } from "@/components/ui/label";
 import { saveBatchRecords, saveRecord } from "@/lib/backend";
 
 const materialTypes = ["INDUGEL", "ANFO", "MECHA DE SEGURIDAD", "DETONADORES"];
+const materialTone:Record<string,string>={
+  INDUGEL:"border-emerald-300 bg-emerald-50 text-emerald-950",
+  ANFO:"border-pink-300 bg-pink-50 text-pink-950",
+  "MECHA DE SEGURIDAD":"border-slate-950 bg-slate-950 text-white",
+  DETONADORES:"border-yellow-300 bg-yellow-50 text-yellow-950",
+};
 
 function Field({ name, label, type = "text", required = true }: { name: string; label: string; type?: string; required?: boolean }) {
   return <div className="space-y-1.5"><Label htmlFor={name}>{label}</Label><Input id={name} name={name} type={type} required={required} inputMode={type === "number" ? "numeric" : undefined} /></div>;
@@ -110,7 +116,7 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
     <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
       <DialogHeader><DialogTitle>NUEVO REGISTRO</DialogTitle></DialogHeader>
       <form onSubmit={submit} className="space-y-5">
-        {choices.length>1&&<div className="space-y-2"><Label>TIPO DE MATERIAL</Label><div className="grid gap-2 sm:grid-cols-2">{choices.map(value=><button key={value} type="button" onClick={()=>{setType(value);setBatchMode(false);setRangeCount(1);}} className={`rounded-lg border px-3 py-3 text-sm font-semibold ${type===value?"border-[#f5b51b] bg-amber-50 text-[#0d2c3e]":"bg-white text-slate-600"}`}>{value}</button>)}</div></div>}
+        {choices.length>1&&<div className="space-y-2"><Label>TIPO DE MATERIAL</Label><div className="grid gap-2 sm:grid-cols-2">{choices.map(value=><button key={value} type="button" onClick={()=>{setType(value);setBatchMode(false);setRangeCount(1);}} className={`rounded-lg border px-3 py-3 text-sm font-semibold transition ${type===value?`${materialTone[value]} ring-2 ring-current/15`:"bg-white text-slate-600"}`}>{value}</button>)}</div></div>}
         {(type==="INDUGEL"||type==="ANFO")&&<div className="grid grid-cols-2 rounded-lg border bg-slate-100 p-1"><button type="button" onClick={()=>setBatchMode(false)} className={`rounded-md px-3 py-2 text-sm font-semibold ${!batchMode?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>INGRESO INDIVIDUAL</button><button type="button" onClick={()=>setBatchMode(true)} className={`rounded-md px-3 py-2 text-sm font-semibold ${batchMode?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>INGRESO POR CANTIDAD</button></div>}
         <div className="grid gap-4 sm:grid-cols-2" key={type}>
           {(type === "INDUGEL" || type === "ANFO") && <>{batchMode?<BatchRanges count={rangeCount} setCount={setRangeCount}/>:<Field name="serial" label="SERIAL" type="number" />}<AutoExpiryDates {...manufacturingDateProps}/><CommonFields {...entryDateProps}/></>}
