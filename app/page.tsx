@@ -25,7 +25,7 @@ function inventoryMeasure(material:string,count:number,view:number){
     return formatNumber(count);
   }
   if(material==="ANFO")return formatNumber(count);
-  if(material==="MECHA DE SEGURIDAD")return formatNumber(view===1?count*2:count);
+  if(material==="MECHA DE SEGURIDAD")return formatNumber(view===1?count*2:view===2?count*500:count);
   if(material==="DETONADORES"){
     if(view===1)return formatNumber(count*100);
     if(view===2)return formatNumber(count*10000);
@@ -36,14 +36,14 @@ function inventoryMeasure(material:string,count:number,view:number){
 function inventoryUnit(material:string,view:number){
   if(material==="INDUGEL")return view===1?"BARRAS":"CAJAS";
   if(material==="ANFO")return "BULTOS";
-  if(material==="MECHA DE SEGURIDAD")return view===1?"BOBINAS":"CAJAS";
+  if(material==="MECHA DE SEGURIDAD")return view===1?"BOBINAS":view===2?"METROS":"CAJAS";
   if(material==="DETONADORES")return view===1?"CAJAS":view===2?"DETONADORES":"CARTONES";
   return "UNIDADES";
 }
 function measureHint(material:string,view:number){
   if(material==="ANFO")return "Ingreso por bultos";
   if(material==="INDUGEL")return view===0?"Tocar para ver barras":"Tocar para ver cajas";
-  if(material==="MECHA DE SEGURIDAD")return view===0?"Tocar para ver bobinas":"Tocar para ver cajas";
+  if(material==="MECHA DE SEGURIDAD")return view===0?"Tocar para ver bobinas":view===1?"Tocar para ver metros":"Tocar para ver cajas";
   if(view===0)return "Tocar para ver cajas";
   if(view===1)return "Tocar para ver detonadores";
   return "Tocar para ver cartones";
@@ -175,7 +175,7 @@ export default function Home() {
             const locationCount=location==="interior"?interior:surface;
             return (
             <div key={name} className={`relative rounded-2xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected === name ? "border-[#f5b51b] ring-2 ring-[#f5b51b]/20" : "border-slate-200"}`}>
-              <button type="button" onClick={() => {setSelected(name);if(name!=="ANFO")setMaterialViews(current=>({...current,[name]:(view+1)%(name==="DETONADORES"?3:2)}));}} className="group block w-full text-left" aria-label={`${name}. ${measureHint(name,view)}`}>
+              <button type="button" onClick={() => {setSelected(name);if(name!=="ANFO")setMaterialViews(current=>({...current,[name]:(view+1)%((name==="DETONADORES"||name==="MECHA DE SEGURIDAD")?3:2)}));}} className="group block w-full text-left" aria-label={`${name}. ${measureHint(name,view)}`}>
                 {name==="DETONADORES"&&<span title="Material de manejo especial" className="absolute right-4 top-4 grid h-7 w-7 place-items-center rounded-full bg-yellow-100 text-yellow-700"><AlertTriangle className="h-4 w-4" aria-label="Precaución"/></span>}
                 <span className="flex items-center justify-between gap-2 pr-7 text-base font-bold leading-tight">{name}<ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:translate-x-1" /></span>
                 <span className="mt-3 grid grid-cols-[4.5rem_1fr] items-stretch gap-3">
