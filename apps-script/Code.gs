@@ -29,6 +29,7 @@ function doPost(e) {
     if (action === "login") return json_(login_(body));
     const user = requireSession_(body.token);
     if (action === "list") return json_({ ok: true, records: publicRecords_(load_()) });
+    if (action === "sync") return json_(sync_(body.operations || [], user.usuario));
     if (action === "create") return json_(create_(body.record || {}, user.usuario, body.operationId));
     if (action === "createBatch") return json_(createBatch_(body.batch || {}, user.usuario, body.operationId));
     if (action === "verifyBatch") return json_(verifyBatch_(body, user.usuario, body.operationId));
@@ -69,7 +70,25 @@ function save_(db) {
 function status_(token) {
   const db = load_(); let current = null;
   try { current = sessionFromDb_(db, token); } catch (_) {}
-  return { ok: true, apiVersion: 2, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
+  return { ok: true, apiVersion: 3, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
+}
+
+function sync_(operations,usuario) {
+  if(!Array.isArray(operations))throw new Error("El lote de sincronización no es válido.");
+  if(operations.length>500)throw new Error("El lote supera el máximo de 500 operaciones.");
+  const processed=[];
+  operations.forEach(function(operation){
+    const id=required_(operation&&operation.id,"operación");
+    const action=required_(operation&&operation.action,"acción");
+    const data=operation.data||{};
+    if(action==="create")create_(data.record||{},usuario,id);
+    else if(action==="createBatch")createBatch_(data.batch||{},usuario,id);
+    else if(action==="verifyBatch")verifyBatch_(data,usuario,id);
+    else if(action==="move")move_(data,usuario,id);
+    else throw new Error("Operación pendiente no reconocida: "+action);
+    processed.push(id);
+  });
+  return {ok:true,apiVersion:3,processed:processed,records:publicRecords_(load_())};
 }
 
 function bootstrap_(body) {
