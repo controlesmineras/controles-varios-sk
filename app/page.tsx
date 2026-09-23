@@ -37,16 +37,16 @@ function inventoryUnit(material:string,view:number){
   if(material==="INDUGEL")return view===1?"BARRAS":"CAJAS";
   if(material==="ANFO")return "BULTOS";
   if(material==="MECHA DE SEGURIDAD")return view===1?"BOBINAS":view===2?"METROS":"CAJAS";
-  if(material==="DETONADORES")return view===1?"CAJAS":view===2?"DETONADORES":"CARTONES";
+  if(material==="DETONADORES")return view===1?"CAJAS INTERIORES":view===2?"DETONADORES":"CAJAS";
   return "UNIDADES";
 }
 function measureHint(material:string,view:number){
   if(material==="ANFO")return "Ingreso por bultos";
   if(material==="INDUGEL")return view===0?"Tocar para ver barras":"Tocar para ver cajas";
   if(material==="MECHA DE SEGURIDAD")return view===0?"Tocar para ver bobinas":view===1?"Tocar para ver metros":"Tocar para ver cajas";
-  if(view===0)return "Tocar para ver cajas";
+  if(view===0)return "Tocar para ver cajas interiores";
   if(view===1)return "Tocar para ver detonadores";
-  return "Tocar para ver cartones";
+  return "Tocar para ver cajas";
 }
 
 function MaterialIcon({name}:{name:string}){
