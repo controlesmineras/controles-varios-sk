@@ -60,6 +60,7 @@ export default function Home() {
   const [verificationFilter,setVerificationFilter]=useState("TODOS");
   const [verificationSignal,setVerificationSignal]=useState(0);
   const [materialViews,setMaterialViews]=useState<Record<string,number>>({});
+  const [materialLocations,setMaterialLocations]=useState<Record<string,"interior"|"surface">>({});
   const [syncState,setSyncState]=useState<"idle"|"syncing"|"success"|"error">("idle");
   const [lastSync,setLastSync]=useState("");
   const [pendingSync,setPendingSync]=useState(0);
@@ -163,6 +164,8 @@ export default function Home() {
             const interior=available.filter(record=>record.ubicacion==="Polvorín interior de mina").length;
             const surface=available.filter(record=>record.ubicacion==="Polvorín superficie").length;
             const view=materialViews[name]||0;
+            const location=materialLocations[name]||"interior";
+            const locationCount=location==="interior"?interior:surface;
             return (
             <div key={name} className={`relative rounded-2xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected === name ? "border-[#f5b51b] ring-2 ring-[#f5b51b]/20" : "border-slate-200"}`}>
               <button type="button" onClick={() => {setSelected(name);if(name!=="ANFO")setMaterialViews(current=>({...current,[name]:(view+1)%(name==="DETONADORES"?3:2)}));}} className="group block w-full text-left" aria-label={`${name}. ${measureHint(name,view)}`}>
@@ -172,12 +175,15 @@ export default function Home() {
                   <span className={`module-icon module-icon-${tone}`}><MaterialIcon name={name}/></span>
                   <span className="grid content-center gap-1.5 text-xs text-slate-600">
                     <span className="flex items-start justify-between gap-2"><span className="font-semibold uppercase tracking-wide text-slate-500">Total</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,available.length,view)}</strong></span>
-                    <span className="flex items-start justify-between gap-2"><span>Polvorín</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,interior,view)}</strong></span>
-                    <span className="flex items-start justify-between gap-2"><span>Almacén</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,surface,view)}</strong></span>
+                    <span className="flex items-start justify-between gap-2"><span>{location==="interior"?"Polvorín":"Almacén"}</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,locationCount,view)}</strong></span>
                   </span>
                 </span>
                 <span className="mt-3 block border-t border-slate-100 pt-2 text-[10px] font-medium text-slate-400">{measureHint(name,view)}</span>
               </button>
+              <div className="mt-3 grid grid-cols-2 rounded-lg bg-slate-100 p-1" role="group" aria-label={`Ubicación para ${name}`}>
+                <button type="button" onClick={()=>{setSelected(name);setMaterialLocations(current=>({...current,[name]:"interior"}));}} className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${location==="interior"?"bg-white text-[#0d2c3e] shadow-sm":"text-slate-500 hover:text-slate-800"}`}>Polvorín</button>
+                <button type="button" onClick={()=>{setSelected(name);setMaterialLocations(current=>({...current,[name]:"surface"}));}} className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${location==="surface"?"bg-white text-[#0d2c3e] shadow-sm":"text-slate-500 hover:text-slate-800"}`}>Almacén</button>
+              </div>
             </div>
           )})}
         </section>
