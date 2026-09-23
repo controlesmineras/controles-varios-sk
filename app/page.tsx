@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Archive, Bomb, Cable, Check, ChevronRight, Loader2, LogOut, MapPin, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, Loader2, LogOut, MapPin, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RecordDialog } from "@/components/record-dialog";
@@ -12,11 +12,18 @@ import { InstallAppButton } from "@/components/install-app-button";
 import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout, pendingOperations } from "@/lib/backend";
 
 const modules = [
-  { name: "INDUGEL", detail: "Seriales y ubicación", icon: Bomb, tone: "green" },
-  { name: "ANFO", detail: "Seriales y ubicación", icon: Archive, tone: "pink" },
-  { name: "MECHA DE SEGURIDAD", detail: "Cajas, bobinas y rangos", icon: Cable, tone: "black" },
-  { name: "DETONADORES", detail: "Cajas y lotes", icon: ShieldCheck, tone: "pale-yellow" },
+  { name: "INDUGEL", detail: "Seriales y ubicación", tone: "green" },
+  { name: "ANFO", detail: "Seriales y ubicación", tone: "pink" },
+  { name: "MECHA DE SEGURIDAD", detail: "Cajas, bobinas y rangos", tone: "black" },
+  { name: "DETONADORES", detail: "Cajas y lotes", tone: "pale-yellow" },
 ] as const;
+
+function MaterialIcon({name}:{name:string}){
+  if(name==="ANFO")return <svg viewBox="0 0 32 32" className="h-6 w-6" aria-hidden="true"><path d="M11 5h10l-2 4c4 3 7 8 7 13 0 4-3 6-10 6S6 26 6 22c0-5 3-10 7-13l-2-4Z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/><path d="M11 10h10M12 16c2 1 6 1 8 0M10 22c3-1 9-1 12 0" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/></svg>;
+  if(name==="INDUGEL")return <svg viewBox="0 0 36 32" className="h-6 w-7" aria-hidden="true"><path d="m7 12-4-3m4 11-4 3m26-11 4-3m-4 11 4 3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/><path d="M8 10c-2 2-2 10 0 12h20c2-2 2-10 0-12H8Z" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round"/><path d="M11 10v12m14-12v12" fill="none" stroke="currentColor" strokeWidth="1.5"/></svg>;
+  if(name==="MECHA DE SEGURIDAD")return <svg viewBox="0 0 36 32" className="h-6 w-7" aria-hidden="true"><path d="M5 26c2-12 17-3 19-13 1-4-2-6-5-6-4 0-6 3-6 6" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"/><path d="M25 11c-2-3 1-6 3-8 0 3 4 4 3 8-.5 2-2 4-4 4s-3-2-2-4Z" fill="#f59e0b" stroke="#fbbf24" strokeWidth="1.2"/></svg>;
+  return <svg viewBox="0 0 36 32" className="h-6 w-7" aria-hidden="true"><path d="M7 17h21c2 0 3 2 3 4s-1 4-3 4H7c-2 0-3-2-3-4s1-4 3-4Z" fill="none" stroke="currentColor" strokeWidth="2"/><path d="M9 17v8m16-8v8M31 21h3" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/><path d="M18 3 25 14H11L18 3Z" fill="#facc15" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/><path d="M18 7v3m0 2v.2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>;
+}
 
 export default function Home() {
   const [authenticated, setAuthenticated] = useState(false);
@@ -120,10 +127,11 @@ export default function Home() {
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Clases de inventario">
-          {modules.map(({ name, detail, icon: Icon, tone }) => (
-            <div key={name} className={`rounded-2xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected === name ? "border-[#f5b51b] ring-2 ring-[#f5b51b]/20" : "border-slate-200"}`}>
+          {modules.map(({ name, detail, tone }) => (
+            <div key={name} className={`relative rounded-2xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected === name ? "border-[#f5b51b] ring-2 ring-[#f5b51b]/20" : "border-slate-200"}`}>
               <button type="button" onClick={() => setSelected(name)} className="group block w-full text-left">
-                <span className={`module-icon module-icon-${tone}`}><Icon className="h-5 w-5" /></span>
+                <span className={`module-icon module-icon-${tone}`}><MaterialIcon name={name}/></span>
+                {name==="DETONADORES"&&<span title="Material de manejo especial" className="absolute right-4 top-4 grid h-7 w-7 place-items-center rounded-full bg-yellow-100 text-yellow-700"><AlertTriangle className="h-4 w-4" aria-label="Precaución"/></span>}
                 <span className="mt-5 block text-sm font-semibold leading-tight">{name}</span>
                 <span className="mt-1 flex items-center justify-between text-sm text-slate-500">{detail}<ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" /></span>
               </button>
