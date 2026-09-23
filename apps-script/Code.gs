@@ -29,11 +29,12 @@ function doPost(e) {
     if (action === "login") return json_(login_(body));
     const user = requireSession_(body.token);
     if (action === "list") return json_({ ok: true, records: publicRecords_(load_()) });
-    if (action === "sync") return json_(sync_(body.operations || [], user.usuario));
+    if (action === "sync") return json_(sync_(body.operations || [], user));
     if (action === "create") return json_(create_(body.record || {}, user.usuario, body.operationId));
     if (action === "createBatch") return json_(createBatch_(body.batch || {}, user.usuario, body.operationId));
     if (action === "verifyBatch") return json_(verifyBatch_(body, user.usuario, body.operationId));
     if (action === "move") return json_(move_(body, user.usuario, body.operationId));
+    if (action === "deleteRecord") return json_(deleteRecord_(body, user, body.operationId));
     if (action === "usersList") return json_(usersList_(user));
     if (action === "userCreate") return json_(userCreate_(body, user));
     if (action === "userResetPassword") return json_(userResetPassword_(body, user));
@@ -43,7 +44,7 @@ function doPost(e) {
 }
 
 function emptyDb_() {
-  return { version: 2, records: { INDUGEL: [], ANFO: [], "MECHA DE SEGURIDAD": [], DETONADORES: [], SELLOS: [] }, users: [], sessions: [], processedOperations: [] };
+  return { version: 2, records: { INDUGEL: [], ANFO: [], "MECHA DE SEGURIDAD": [], DETONADORES: [], SELLOS: [] }, users: [], sessions: [], processedOperations: [], deletedRecords: [] };
 }
 
 function load_() {
@@ -55,7 +56,7 @@ function load_() {
   }
   try {
     const db = JSON.parse(DriveApp.getFileById(id).getBlob().getDataAsString("UTF-8"));
-    db.records = db.records || emptyDb_().records; db.users = db.users || []; db.sessions = db.sessions || []; db.processedOperations=db.processedOperations||[];
+    db.records = db.records || emptyDb_().records; db.users = db.users || []; db.sessions = db.sessions || []; db.processedOperations=db.processedOperations||[];db.deletedRecords=db.deletedRecords||[];
     if(db.users.length&&!db.users.some(u=>u.protegido===true))db.users[0].protegido=true;
     return db;
   } catch (_) { throw new Error("No se pudo leer la base privada. Verifica que el archivo no haya sido eliminado."); }
@@ -70,10 +71,10 @@ function save_(db) {
 function status_(token) {
   const db = load_(); let current = null;
   try { current = sessionFromDb_(db, token); } catch (_) {}
-  return { ok: true, apiVersion: 3, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
+  return { ok: true, apiVersion: 4, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
 }
 
-function sync_(operations,usuario) {
+function sync_(operations,user) {
   if(!Array.isArray(operations))throw new Error("El lote de sincronización no es válido.");
   if(operations.length>500)throw new Error("El lote supera el máximo de 500 operaciones.");
   const processed=[];
@@ -81,14 +82,15 @@ function sync_(operations,usuario) {
     const id=required_(operation&&operation.id,"operación");
     const action=required_(operation&&operation.action,"acción");
     const data=operation.data||{};
-    if(action==="create")create_(data.record||{},usuario,id);
-    else if(action==="createBatch")createBatch_(data.batch||{},usuario,id);
-    else if(action==="verifyBatch")verifyBatch_(data,usuario,id);
-    else if(action==="move")move_(data,usuario,id);
+    if(action==="create")create_(data.record||{},user.usuario,id);
+    else if(action==="createBatch")createBatch_(data.batch||{},user.usuario,id);
+    else if(action==="verifyBatch")verifyBatch_(data,user.usuario,id);
+    else if(action==="move")move_(data,user.usuario,id);
+    else if(action==="deleteRecord")deleteRecord_(data,user,id);
     else throw new Error("Operación pendiente no reconocida: "+action);
     processed.push(id);
   });
-  return {ok:true,apiVersion:3,processed:processed,records:publicRecords_(load_())};
+  return {ok:true,apiVersion:4,processed:processed,records:publicRecords_(load_())};
 }
 
 function bootstrap_(body) {
@@ -172,6 +174,20 @@ function move_(body,usuario,operationId) {
     const destino=required_(body.ubicacion,"ubicación"); if(APP.locations.indexOf(destino)<0)throw new Error("Ubicación no válida."); if(item.ubicacion===destino)throw new Error("El material ya se encuentra en esa ubicación.");
     item.movimientos=item.movimientos||[]; item.movimientos.unshift({fecha:iso_(),origen:item.ubicacion,destino:destino,usuario:usuario}); item.ubicacion=destino;
     markOperation_(db,operationId);return {ok:true};
+  });
+}
+
+function deleteRecord_(body,user,operationId) {
+  requireAdmin_(user);
+  return locked_(function(db) {
+    if(operationDone_(db,operationId))return {ok:true,repeated:true};
+    const tipo=required_(body.tipo,"tipo");if(tipo==="SELLOS"||!db.records[tipo])throw new Error("Tipo de material no válido para eliminación.");
+    const id=required_(body.id,"registro");const index=db.records[tipo].findIndex(function(item){return String(item.id)===id;});
+    if(index<0)throw new Error("El registro que intentas eliminar ya no existe.");
+    const removed=db.records[tipo].splice(index,1)[0];
+    db.deletedRecords=db.deletedRecords||[];db.deletedRecords.unshift({tipo:tipo,registro:removed,eliminadoPor:user.usuario,fechaEliminacion:iso_()});
+    if(db.deletedRecords.length>5000)db.deletedRecords=db.deletedRecords.slice(0,5000);
+    markOperation_(db,operationId);return {ok:true,id:id};
   });
 }
 
