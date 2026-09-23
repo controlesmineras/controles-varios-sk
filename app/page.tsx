@@ -12,17 +12,17 @@ import { InstallAppButton } from "@/components/install-app-button";
 import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout, pendingOperations } from "@/lib/backend";
 
 const modules = [
-  { name: "INDUGEL", detail: "Seriales y ubicación", tone: "green" },
-  { name: "ANFO", detail: "Seriales y ubicación", tone: "pink" },
-  { name: "MECHA DE SEGURIDAD", detail: "Cajas, bobinas y rangos", tone: "black" },
-  { name: "DETONADORES", detail: "Cajas y lotes", tone: "pale-yellow" },
+  { name: "INDUGEL", tone: "green" },
+  { name: "ANFO", tone: "pink" },
+  { name: "MECHA DE SEGURIDAD", tone: "black" },
+  { name: "DETONADORES", tone: "pale-yellow" },
 ] as const;
 
 function MaterialIcon({name}:{name:string}){
   if(name==="ANFO")return <svg viewBox="0 0 36 32" className="h-7 w-7" aria-hidden="true"><path d="M8 4.5c6 1 14 1 20 0l-1 5c1.5 5 2 11.5 1 17-6.5 1.5-13.5 1.5-20 0-1-5.5-.5-12 1-17l-1-5Z" fill="#fff" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round"/><path d="M9 8.5c6 .8 12 .8 18 0M9 26.5c6-1 12-1 18 0" fill="none" stroke="currentColor" strokeWidth=".8" opacity=".55"/><path d="m18 10 4 4-4 4-4-4 4-4Z" fill="#fb923c" stroke="#c2410c" strokeWidth=".8"/><text x="18" y="23.5" textAnchor="middle" fontSize="5.2" fontWeight="800" fill="currentColor">ANFO</text></svg>;
   if(name==="INDUGEL")return <svg viewBox="0 0 42 32" className="h-7 w-8" aria-hidden="true"><g transform="rotate(-28 21 16)"><path d="M4.5 12.5h33c1 0 1.5 1.4 1.5 3.5s-.5 3.5-1.5 3.5h-33C3.5 19.5 3 18.1 3 16s.5-3.5 1.5-3.5Z" fill="#e5e7eb" stroke="currentColor" strokeWidth="1"/><circle cx="2" cy="16" r="1.1" fill="currentColor"/><circle cx="40" cy="16" r="1.1" fill="currentColor"/><path d="M5 12.8v6.4m32-6.4v6.4" fill="none" stroke="currentColor" strokeWidth=".65"/><path d="m10 14.4 2.4 2.4m6-2.4 2.4 2.4m6-2.4 2.4 2.4" fill="none" stroke="#dc2626" strokeWidth=".9" strokeLinecap="round"/></g></svg>;
   if(name==="MECHA DE SEGURIDAD")return <svg viewBox="0 0 40 30" className="h-6 w-8" aria-hidden="true"><path d="M4 22c7 0 8-7 15-7s8 6 14 2" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round"/><path d="m31.5 18.2 2.7-2.7" fill="none" stroke="#fbbf24" strokeWidth="1.5" strokeLinecap="round"/><path d="M33.5 13.8c-1.5-3 1.2-6.8 4-9.3-.3 3.2 3.3 4.7 2.2 8.3-.7 2.3-2.3 3.8-4.1 3.5-1.7-.3-2.8-1.2-2.1-2.5Z" fill="#f59e0b" stroke="#fbbf24" strokeWidth="1" strokeLinejoin="round"/><path d="M35.4 13.5c-.4-1.2.4-2.5 1.4-3.5 0 1.2 1.2 1.8.8 3-.3.8-.8 1.3-1.4 1.2-.5 0-.9-.3-.8-.7Z" fill="#fef3c7"/></svg>;
-  return <svg viewBox="0 0 60 44" className="h-8 w-10" aria-hidden="true"><g transform="rotate(-24 30 22)"><g fill="#f97316" stroke="#fef9c3" strokeWidth=".75" strokeLinejoin="round"><path d="m9 17-8-5 4.5 6L0 21l9 1-4-2.7Z"/><path d="m13 14-5-11 6.5 7L15 0l3 14-2.5-6Z"/><path d="m23 13-1-11 4 7 4-9-2 14-2-7Z"/><path d="m35 14 4-12 1 8 7-7-6 12-.5-7Z"/><path d="m48 16 8-8-4 8 8-2-10 6 5-5Z"/><path d="m51 22 9-1-7 4 6 5-10-4 5-1.5Z"/><path d="m46 29 10 8-8-4 3 9-8-12 5 4Z"/><path d="m36 30 5 13-5-8-2 9-2-14 4 6Z"/><path d="m25 30-1 13-3-8-5 8 4-14 2 7Z"/><path d="m15 28-7 12 3-9-9 6 10-10-6 3Z"/><path d="m9 24-9 4 6-5-6-3 10 .5-5 2.5Z"/></g><g fill="#facc15" stroke="#fef9c3" strokeWidth=".7" strokeLinejoin="round"><path d="m11 19-7-2 5 4-6 2 8 .5-4-2.3Z"/><path d="m19 14-2-8 4 6 2-8-.5 10-2-5Z"/><path d="m30 13 2-9 1 7 5-7-4 10-1-5Z"/><path d="m42 15 6-8-3 8 7-4-8 7 3-4Z"/><path d="m50 19 8-3-6 5 7 1-9 2 4-3Z"/><path d="m42 28 7 8-5-5 1 8-5-10 4 4Z"/><path d="m30 30 2 9-4-6-2 8 1-11 2.5 5Z"/><path d="m19 29-4 9 1-7-7 6 7-9-4 3Z"/></g><path d="M11 18.5h38c1.8 0 2.7 1.6 2.7 3.5s-.9 3.5-2.7 3.5H11c-1.7 0-2.7-1.6-2.7-3.5s1-3.5 2.7-3.5Z" fill="#d1d5db" stroke="currentColor" strokeWidth="1"/><path d="M11.5 20h32" fill="none" stroke="#fff" strokeWidth="1" strokeLinecap="round" opacity=".9"/><path d="M12 24h31" fill="none" stroke="#9ca3af" strokeWidth=".7" strokeLinecap="round"/><path d="M42.5 18.7c-1 2.2-1 4.4 0 6.6m2.4-6.6c-1 2.2-1 4.4 0 6.6m2.4-6.5c-.9 2.1-.9 4.3 0 6.4" fill="none" stroke="#6b7280" strokeWidth="1.15"/></g></svg>;
+  return <svg viewBox="0 0 36 32" className="h-6 w-7" aria-hidden="true"><path d="M7 17h21c2 0 3 2 3 4s-1 4-3 4H7c-2 0-3-2-3-4s1-4 3-4Z" fill="none" stroke="currentColor" strokeWidth="2"/><path d="M9 17v8m16-8v8M31 21h3" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/><path d="M18 3 25 14H11L18 3Z" fill="#facc15" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round"/><path d="M18 7v3m0 2v.2" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>;
 }
 
 export default function Home() {
@@ -107,8 +107,8 @@ export default function Home() {
           <div className="grid gap-4 sm:grid-cols-[auto_1fr] sm:items-center">
             <button type="button" onClick={()=>setSelected("SELLOS")} className="flex items-center gap-3 text-left"><span className="grid h-11 w-11 place-items-center rounded-xl bg-[#f5b51b] text-[#0d2c3e]"><ShieldCheck className="h-6 w-6"/></span><span><strong className="block">CONTROL DE PRECINTOS</strong><span className="text-sm text-slate-600">{records.SELLOS?.length || 0} registros de seguridad</span></span></button>
             <div className="grid grid-cols-2 gap-2" aria-label="Últimos precintos registrados">
-              <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3"><span className="block text-[11px] font-semibold uppercase tracking-wide text-emerald-700">PRECINTO INDUGEL</span><strong className="mt-1 block text-xl tabular-nums text-[#0d2c3e]">{String(latestPrecinto?.selloIndugel ?? "—")}</strong></div>
-              <div className="rounded-xl border border-pink-200 bg-pink-50 px-4 py-3"><span className="block text-[11px] font-semibold uppercase tracking-wide text-pink-700">PRECINTO ANFO</span><strong className="mt-1 block text-xl tabular-nums text-[#0d2c3e]">{String(latestPrecinto?.selloAnfo ?? "—")}</strong></div>
+              <div className="rounded-xl border border-amber-200 bg-white px-4 py-3"><span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">PRECINTO INDUGEL</span><strong className="mt-1 block text-xl tabular-nums text-[#0d2c3e]">{String(latestPrecinto?.selloIndugel ?? "—")}</strong></div>
+              <div className="rounded-xl border border-amber-200 bg-white px-4 py-3"><span className="block text-[11px] font-semibold uppercase tracking-wide text-slate-500">PRECINTO ANFO</span><strong className="mt-1 block text-xl tabular-nums text-[#0d2c3e]">{String(latestPrecinto?.selloAnfo ?? "—")}</strong></div>
             </div>
           </div>
           <RecordDialog initialType="SELLOS" onSaved={loadRecords} triggerLabel="REGISTRAR PRECINTOS" triggerClassName="h-10 bg-[#0d2c3e] px-5 text-xs font-semibold text-white hover:bg-[#16445d]" />
@@ -127,19 +127,29 @@ export default function Home() {
         </section>
 
         <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Clases de inventario">
-          {modules.map(({ name, detail, tone }) => (
+          {modules.map(({ name, tone }) => {
+            const available=(records[name]||[]).filter(record=>record.verificado!==false);
+            const interior=available.filter(record=>record.ubicacion==="Polvorín interior de mina").length;
+            const surface=available.filter(record=>record.ubicacion==="Polvorín superficie").length;
+            return (
             <div key={name} className={`relative rounded-2xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected === name ? "border-[#f5b51b] ring-2 ring-[#f5b51b]/20" : "border-slate-200"}`}>
-              <button type="button" onClick={() => setSelected(name)} className="group block w-full text-left">
-                <span className={`module-icon module-icon-${tone}`}><MaterialIcon name={name}/></span>
+              <button type="button" onClick={() => setSelected(name)} className="group flex w-full items-start gap-3 text-left">
+                <span className={`module-icon module-icon-${tone} shrink-0`}><MaterialIcon name={name}/></span>
                 {name==="DETONADORES"&&<span title="Material de manejo especial" className="absolute right-4 top-4 grid h-7 w-7 place-items-center rounded-full bg-yellow-100 text-yellow-700"><AlertTriangle className="h-4 w-4" aria-label="Precaución"/></span>}
-                <span className="mt-5 block text-sm font-semibold leading-tight">{name}</span>
-                <span className="mt-1 flex items-center justify-between text-sm text-slate-500">{detail}<ChevronRight className="h-4 w-4 transition group-hover:translate-x-1" /></span>
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center justify-between gap-2 pr-5 text-sm font-semibold leading-tight">{name}<ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:translate-x-1" /></span>
+                  <span className="mt-3 grid gap-1.5 text-xs text-slate-600">
+                    <span className="flex items-center justify-between gap-2"><span className="font-semibold uppercase tracking-wide text-slate-500">Total</span><strong className="tabular-nums text-slate-900">{available.length}</strong></span>
+                    <span className="flex items-center justify-between gap-2"><span>Polvorín interior de mina</span><strong className="tabular-nums text-slate-900">{interior}</strong></span>
+                    <span className="flex items-center justify-between gap-2"><span>Superficie</span><strong className="tabular-nums text-slate-900">{surface}</strong></span>
+                  </span>
+                </span>
               </button>
             </div>
-          ))}
+          )})}
         </section>
 
-        <section className="mt-7 grid gap-5 lg:grid-cols-[1.55fr_0.75fr]">
+        <section className="mt-7">
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
               <div><h2 className="text-lg font-semibold">{selected === "SELLOS" ? "PRECINTOS" : selected}</h2><p className="text-sm text-slate-500">Registros disponibles</p></div>
@@ -150,17 +160,6 @@ export default function Home() {
             </div> : <div className="divide-y divide-slate-100">{selectedRecords.map((record) => <article key={String(record.id)} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{String(record.serial || record.cajaNumero || `Registro ${record.id}`)}</p>{record.verificado===false&&<span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">PENDIENTE DE VERIFICAR</span>}</div><p className="text-sm text-slate-500">{String(record.loteProduccion || record.contenido || "Registro individual")}</p>{selected!=="SELLOS"&&<p className="mt-1 text-xs text-slate-500">Ingreso: {String(record.fechaIngreso||"")} · Fabricación: {String(record.fechaFabricacion||record.fechaProduccion||"")} · Vencimiento: {String(record.fechaVencimiento||"")}</p>}</div>{selected!=="SELLOS"&&<div className="flex items-center gap-2 text-sm text-slate-600 sm:justify-end"><MapPin className="h-4 w-4" />{String(record.ubicacion||"")}</div>}</article>)}</div>}
           </div>
 
-          <aside className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-            <div className="flex items-center gap-3">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-emerald-50 text-emerald-700"><MapPin className="h-5 w-5" /></span>
-              <div><h2 className="font-semibold">DISTRIBUCIÓN</h2><p className="text-sm text-slate-500">Existencias por polvorín</p></div>
-            </div>
-            <div className="mt-5 space-y-3">
-              {["Polvorín superficie", "Polvorín interior de mina"].map((location) => (
-                <div key={location} className="flex items-center justify-between rounded-xl bg-slate-50 px-4 py-3"><span className="text-sm font-medium">{location}</span><span className="text-sm tabular-nums text-slate-500">{Object.values(records).flat().filter((record) => record.ubicacion === location&&record.verificado!==false).length}</span></div>
-              ))}
-            </div>
-          </aside>
         </section>
       </div>
     </main>
