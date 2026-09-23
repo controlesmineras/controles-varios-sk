@@ -25,7 +25,7 @@ function inventoryMeasure(material:string,count:number,view:number){
     return `${formatNumber(count)} ${count===1?"caja":"cajas"}`;
   }
   if(material==="ANFO")return `${formatNumber(count)} ${count===1?"bulto":"bultos"}`;
-  if(material==="MECHA DE SEGURIDAD")return view===1?`${formatNumber(count*500)} metros`:`${formatNumber(count)} ${count===1?"caja":"cajas"}`;
+  if(material==="MECHA DE SEGURIDAD")return view===1?`${formatNumber(count*2)} ${count===0||count>1?"bobinas":"bobinas"}`:`${formatNumber(count)} ${count===1?"caja":"cajas"}`;
   if(material==="DETONADORES"){
     if(view===1)return `${formatNumber(count*100)} cajas`;
     if(view===2)return `${formatNumber(count*10000)} detonadores`;
@@ -36,7 +36,7 @@ function inventoryMeasure(material:string,count:number,view:number){
 function measureHint(material:string,view:number){
   if(material==="ANFO")return "Ingreso por bultos";
   if(material==="INDUGEL")return view===0?"Tocar para ver barras":"Tocar para ver cajas";
-  if(material==="MECHA DE SEGURIDAD")return view===0?"Tocar para ver metros":"Tocar para ver cajas";
+  if(material==="MECHA DE SEGURIDAD")return view===0?"Tocar para ver bobinas":"Tocar para ver cajas";
   if(view===0)return "Tocar para ver cajas";
   if(view===1)return "Tocar para ver detonadores";
   return "Tocar para ver cartones";
