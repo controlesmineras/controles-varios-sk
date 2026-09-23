@@ -21,17 +21,24 @@ const modules = [
 const formatNumber=(value:number)=>new Intl.NumberFormat("es-CO").format(value);
 function inventoryMeasure(material:string,count:number,view:number){
   if(material==="INDUGEL"){
-    if(view===1)return `${formatNumber(count*154)} barras`;
-    return `${formatNumber(count)} ${count===1?"caja":"cajas"}`;
+    if(view===1)return formatNumber(count*154);
+    return formatNumber(count);
   }
-  if(material==="ANFO")return `${formatNumber(count)} ${count===1?"bulto":"bultos"}`;
-  if(material==="MECHA DE SEGURIDAD")return view===1?`${formatNumber(count*2)} ${count===0||count>1?"bobinas":"bobinas"}`:`${formatNumber(count)} ${count===1?"caja":"cajas"}`;
+  if(material==="ANFO")return formatNumber(count);
+  if(material==="MECHA DE SEGURIDAD")return formatNumber(view===1?count*2:count);
   if(material==="DETONADORES"){
-    if(view===1)return `${formatNumber(count*100)} cajas`;
-    if(view===2)return `${formatNumber(count*10000)} detonadores`;
-    return `${formatNumber(count)} ${count===1?"cartón":"cartones"}`;
+    if(view===1)return formatNumber(count*100);
+    if(view===2)return formatNumber(count*10000);
+    return formatNumber(count);
   }
   return formatNumber(count);
+}
+function inventoryUnit(material:string,view:number){
+  if(material==="INDUGEL")return view===1?"BARRAS":"CAJAS";
+  if(material==="ANFO")return "BULTOS";
+  if(material==="MECHA DE SEGURIDAD")return view===1?"BOBINAS":"CAJAS";
+  if(material==="DETONADORES")return view===1?"CAJAS":view===2?"DETONADORES":"CARTONES";
+  return "UNIDADES";
 }
 function measureHint(material:string,view:number){
   if(material==="ANFO")return "Ingreso por bultos";
@@ -175,10 +182,10 @@ export default function Home() {
                   <span className={`module-icon module-icon-${tone}`}><MaterialIcon name={name}/></span>
                   <span className="grid content-center gap-1.5 text-xs text-slate-600">
                     <span className="flex items-start justify-between gap-2"><span className="font-semibold uppercase tracking-wide text-slate-500">Total</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,available.length,view)}</strong></span>
-                    <span className="flex items-start justify-between gap-2"><span>{location==="interior"?"Polvorín":"Almacén"}</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,locationCount,view)}</strong></span>
+                    <span className="flex items-start justify-between gap-2"><span>Existencia</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,locationCount,view)}</strong></span>
                   </span>
                 </span>
-                <span className="mt-3 block border-t border-slate-100 pt-2 text-[10px] font-medium text-slate-400">{measureHint(name,view)}</span>
+                <span className="mt-3 block border-t border-slate-100 pt-2 text-center text-[10px] font-bold tracking-[0.12em] text-slate-500">{inventoryUnit(name,view)}</span>
               </button>
               <div className="mt-3 grid grid-cols-2 rounded-lg bg-slate-100 p-1" role="group" aria-label={`Ubicación para ${name}`}>
                 <button type="button" onClick={()=>{setSelected(name);setMaterialLocations(current=>({...current,[name]:"interior"}));}} className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${location==="interior"?"bg-white text-[#0d2c3e] shadow-sm":"text-slate-500 hover:text-slate-800"}`}>Polvorín</button>
