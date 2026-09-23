@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Archive, Check, ChevronRight, Loader2, LogOut, MapPin, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Archive, Check, ChevronRight, Loader2, LogOut, MapPin, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RecordDialog } from "@/components/record-dialog";
@@ -9,7 +9,7 @@ import { AccessDialog } from "@/components/access-dialog";
 import { MovementDialog } from "@/components/movement-dialog";
 import { VerificationDialog } from "@/components/verification-dialog";
 import { InstallAppButton } from "@/components/install-app-button";
-import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout, pendingOperations } from "@/lib/backend";
+import { backendConfigured, createInitialAdmin, deleteRecord, getStatus, listRecords, login, logout, pendingOperations, synchronize } from "@/lib/backend";
 
 const modules = [
   { name: "INDUGEL", tone: "green" },
@@ -80,6 +80,12 @@ export default function Home() {
     [records, selected, query,dateFilter,verificationFilter],
   );
   const latestPrecinto = records.SELLOS?.[0];
+  async function removeRecord(record:Record<string,unknown>){
+    const identifier=String(record.serial||record.cajaNumero||record.id);
+    if(!window.confirm(`¿Eliminar definitivamente el registro ${identifier} de ${selected}?\n\nEsta acción se registrará a tu nombre.`))return;
+    try{await deleteRecord(selected,String(record.id));setRecords(await listRecords());await synchronize();setPendingSync(await pendingOperations());}
+    catch(cause){window.alert(cause instanceof Error?cause.message:"No se pudo eliminar el registro.");await loadRecords();}
+  }
 
   if (checking) return <div className="grid min-h-screen place-items-center bg-slate-50"><Loader2 className="h-7 w-7 animate-spin text-slate-500" /></div>;
   if (!backendConfigured()) return <ConnectionPending />;
@@ -157,7 +163,7 @@ export default function Home() {
             </div>
             {selectedRecords.length === 0 ? <div className="grid min-h-56 place-items-center px-6 py-10 text-center">
               <div><Archive className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-3 font-medium">Aún no hay registros en {selected === "SELLOS" ? "PRECINTOS" : selected}</p><p className="mt-1 text-sm text-slate-500">El primer ingreso aparecerá aquí con su ubicación actual.</p></div>
-            </div> : <div className="divide-y divide-slate-100">{selectedRecords.map((record) => <article key={String(record.id)} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{String(record.serial || record.cajaNumero || `Registro ${record.id}`)}</p>{record.verificado===false&&<span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">PENDIENTE DE VERIFICAR</span>}</div><p className="text-sm text-slate-500">{String(record.loteProduccion || record.contenido || "Registro individual")}</p>{selected!=="SELLOS"&&<p className="mt-1 text-xs text-slate-500">Ingreso: {String(record.fechaIngreso||"")} · Fabricación: {String(record.fechaFabricacion||record.fechaProduccion||"")} · Vencimiento: {String(record.fechaVencimiento||"")}</p>}</div>{selected!=="SELLOS"&&<div className="flex items-center gap-2 text-sm text-slate-600 sm:justify-end"><MapPin className="h-4 w-4" />{String(record.ubicacion||"")}</div>}</article>)}</div>}
+            </div> : <div className="divide-y divide-slate-100">{selectedRecords.map((record) => <article key={String(record.id)} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{String(record.serial || record.cajaNumero || `Registro ${record.id}`)}</p>{record.verificado===false&&<span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">PENDIENTE DE VERIFICAR</span>}</div><p className="text-sm text-slate-500">{String(record.loteProduccion || record.contenido || "Registro individual")}</p>{selected!=="SELLOS"&&<p className="mt-1 text-xs text-slate-500">Ingreso: {String(record.fechaIngreso||"")} · Fabricación: {String(record.fechaFabricacion||record.fechaProduccion||"")} · Vencimiento: {String(record.fechaVencimiento||"")}</p>}</div>{selected!=="SELLOS"&&<div className="flex items-center gap-3 sm:justify-end"><span className="flex items-center gap-2 text-sm text-slate-600"><MapPin className="h-4 w-4" />{String(record.ubicacion||"")}</span>{currentUser?.rol==="ADMINISTRADOR"&&<Button type="button" variant="outline" size="sm" onClick={()=>void removeRecord(record)} className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800" title={`Eliminar ${String(record.serial||record.cajaNumero||record.id)}`}><Trash2 className="h-4 w-4"/><span className="hidden lg:inline">Eliminar</span></Button>}</div>}</article>)}</div>}
           </div>
 
         </section>
