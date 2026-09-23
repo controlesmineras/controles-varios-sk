@@ -19,23 +19,24 @@ const modules = [
 ] as const;
 
 const formatNumber=(value:number)=>new Intl.NumberFormat("es-CO").format(value);
+const formatDecimal=(value:number)=>new Intl.NumberFormat("es-CO",{maximumFractionDigits:2}).format(value);
 function inventoryMeasure(material:string,count:number,detailed:boolean){
   if(material==="INDUGEL"){
     if(detailed)return `${formatNumber(count)} ${count===1?"barra":"barras"}`;
-    const boxes=Math.floor(count/154),loose=count%154;
-    return `${formatNumber(boxes)} ${boxes===1?"caja":"cajas"}${loose?` · ${formatNumber(loose)} ${loose===1?"barra":"barras"}`:""}`;
+    const boxes=count/154;
+    return `${formatDecimal(boxes)} ${boxes===1?"caja":"cajas"}`;
   }
   if(material==="ANFO")return `${formatNumber(count)} ${count===1?"bulto":"bultos"}`;
-  if(material==="MECHA DE SEGURIDAD")return detailed?`${formatNumber(count*2)} bobinas · ${formatNumber(count*500)} m`:`${formatNumber(count)} ${count===1?"caja":"cajas"}`;
-  if(material==="DETONADORES")return detailed?`${formatNumber(count*100)} cajitas · ${formatNumber(count*10000)} detonadores`:`${formatNumber(count)} ${count===1?"caja":"cajas"}`;
+  if(material==="MECHA DE SEGURIDAD")return detailed?`${formatNumber(count*500)} metros`:`${formatNumber(count)} ${count===1?"caja":"cajas"}`;
+  if(material==="DETONADORES")return detailed?`${formatNumber(count*10000)} detonadores`:`${formatNumber(count)} ${count===1?"caja":"cajas"}`;
   return formatNumber(count);
 }
 function measureHint(material:string,detailed:boolean){
   if(material==="ANFO")return "Ingreso por bultos";
   if(detailed)return "Tocar para ver por cajas";
   if(material==="INDUGEL")return "Tocar para ver barras";
-  if(material==="MECHA DE SEGURIDAD")return "Tocar para ver bobinas y metros";
-  return "Tocar para ver cajitas y unidades";
+  if(material==="MECHA DE SEGURIDAD")return "Tocar para ver metros";
+  return "Tocar para ver detonadores";
 }
 
 function MaterialIcon({name}:{name:string}){
