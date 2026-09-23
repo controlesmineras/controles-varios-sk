@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Check, ChevronRight, Loader2, LogOut, MapPin, RefreshCw, Search, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Archive, Check, ChevronRight, Loader2, LogOut, MapPin, RefreshCw, Search, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RecordDialog } from "@/components/record-dialog";
