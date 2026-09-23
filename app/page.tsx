@@ -18,6 +18,26 @@ const modules = [
   { name: "DETONADORES", tone: "pale-yellow" },
 ] as const;
 
+const formatNumber=(value:number)=>new Intl.NumberFormat("es-CO").format(value);
+function inventoryMeasure(material:string,count:number,detailed:boolean){
+  if(material==="INDUGEL"){
+    if(detailed)return `${formatNumber(count)} ${count===1?"barra":"barras"}`;
+    const boxes=Math.floor(count/154),loose=count%154;
+    return `${formatNumber(boxes)} ${boxes===1?"caja":"cajas"}${loose?` · ${formatNumber(loose)} ${loose===1?"barra":"barras"}`:""}`;
+  }
+  if(material==="ANFO")return `${formatNumber(count)} ${count===1?"bulto":"bultos"}`;
+  if(material==="MECHA DE SEGURIDAD")return detailed?`${formatNumber(count*2)} bobinas · ${formatNumber(count*500)} m`:`${formatNumber(count)} ${count===1?"caja":"cajas"}`;
+  if(material==="DETONADORES")return detailed?`${formatNumber(count*100)} cajitas · ${formatNumber(count*10000)} detonadores`:`${formatNumber(count)} ${count===1?"caja":"cajas"}`;
+  return formatNumber(count);
+}
+function measureHint(material:string,detailed:boolean){
+  if(material==="ANFO")return "Ingreso por bultos";
+  if(detailed)return "Tocar para ver por cajas";
+  if(material==="INDUGEL")return "Tocar para ver barras";
+  if(material==="MECHA DE SEGURIDAD")return "Tocar para ver bobinas y metros";
+  return "Tocar para ver cajitas y unidades";
+}
+
 function MaterialIcon({name}:{name:string}){
   if(name==="ANFO")return <svg viewBox="0 0 36 32" className="h-7 w-7" aria-hidden="true"><path d="M8 4.5c6 1 14 1 20 0l-1 5c1.5 5 2 11.5 1 17-6.5 1.5-13.5 1.5-20 0-1-5.5-.5-12 1-17l-1-5Z" fill="#fff" stroke="currentColor" strokeWidth="1.35" strokeLinejoin="round"/><path d="M9 8.5c6 .8 12 .8 18 0M9 26.5c6-1 12-1 18 0" fill="none" stroke="currentColor" strokeWidth=".8" opacity=".55"/><path d="m18 10 4 4-4 4-4-4 4-4Z" fill="#fb923c" stroke="#c2410c" strokeWidth=".8"/><text x="18" y="23.5" textAnchor="middle" fontSize="5.2" fontWeight="800" fill="currentColor">ANFO</text></svg>;
   if(name==="INDUGEL")return <svg viewBox="0 0 42 32" className="h-7 w-8" aria-hidden="true"><g transform="rotate(-28 21 16)"><path d="M4.5 12.5h33c1 0 1.5 1.4 1.5 3.5s-.5 3.5-1.5 3.5h-33C3.5 19.5 3 18.1 3 16s.5-3.5 1.5-3.5Z" fill="#e5e7eb" stroke="currentColor" strokeWidth="1"/><circle cx="2" cy="16" r="1.1" fill="currentColor"/><circle cx="40" cy="16" r="1.1" fill="currentColor"/><path d="M5 12.8v6.4m32-6.4v6.4" fill="none" stroke="currentColor" strokeWidth=".65"/><path d="m10 14.4 2.4 2.4m6-2.4 2.4 2.4m6-2.4 2.4 2.4" fill="none" stroke="#dc2626" strokeWidth=".9" strokeLinecap="round"/></g></svg>;
@@ -35,6 +55,7 @@ export default function Home() {
   const [dateFilter,setDateFilter]=useState("");
   const [verificationFilter,setVerificationFilter]=useState("TODOS");
   const [verificationSignal,setVerificationSignal]=useState(0);
+  const [detailedMaterials,setDetailedMaterials]=useState<Record<string,boolean>>({});
   const [syncState,setSyncState]=useState<"idle"|"syncing"|"success"|"error">("idle");
   const [lastSync,setLastSync]=useState("");
   const [pendingSync,setPendingSync]=useState(0);
@@ -137,17 +158,19 @@ export default function Home() {
             const available=(records[name]||[]).filter(record=>record.verificado!==false);
             const interior=available.filter(record=>record.ubicacion==="Polvorín interior de mina").length;
             const surface=available.filter(record=>record.ubicacion==="Polvorín superficie").length;
+            const detailed=Boolean(detailedMaterials[name]);
             return (
             <div key={name} className={`relative rounded-2xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected === name ? "border-[#f5b51b] ring-2 ring-[#f5b51b]/20" : "border-slate-200"}`}>
-              <button type="button" onClick={() => setSelected(name)} className="group flex w-full items-start gap-3 text-left">
+              <button type="button" onClick={() => {setSelected(name);if(name!=="ANFO")setDetailedMaterials(current=>({...current,[name]:!current[name]}));}} className="group flex w-full items-start gap-3 text-left" aria-label={`${name}. ${measureHint(name,detailed)}`}>
                 <span className={`module-icon module-icon-${tone} shrink-0`}><MaterialIcon name={name}/></span>
                 {name==="DETONADORES"&&<span title="Material de manejo especial" className="absolute right-4 top-4 grid h-7 w-7 place-items-center rounded-full bg-yellow-100 text-yellow-700"><AlertTriangle className="h-4 w-4" aria-label="Precaución"/></span>}
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center justify-between gap-2 pr-5 text-base font-bold leading-tight">{name}<ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:translate-x-1" /></span>
                   <span className="mt-3 grid gap-1.5 text-xs text-slate-600">
-                    <span className="flex items-center justify-between gap-2"><span className="font-semibold uppercase tracking-wide text-slate-500">Total</span><strong className="tabular-nums text-slate-900">{available.length}</strong></span>
-                    <span className="flex items-center justify-between gap-2"><span>Polvorín</span><strong className="tabular-nums text-slate-900">{interior}</strong></span>
-                    <span className="flex items-center justify-between gap-2"><span>Almacén</span><strong className="tabular-nums text-slate-900">{surface}</strong></span>
+                    <span className="flex items-start justify-between gap-2"><span className="font-semibold uppercase tracking-wide text-slate-500">Total</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,available.length,detailed)}</strong></span>
+                    <span className="flex items-start justify-between gap-2"><span>Polvorín</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,interior,detailed)}</strong></span>
+                    <span className="flex items-start justify-between gap-2"><span>Almacén</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,surface,detailed)}</strong></span>
+                    <span className="mt-1 border-t border-slate-100 pt-2 text-[10px] font-medium text-slate-400">{measureHint(name,detailed)}</span>
                   </span>
                 </span>
               </button>
