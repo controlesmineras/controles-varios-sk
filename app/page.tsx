@@ -178,14 +178,14 @@ export default function Home() {
               <button type="button" onClick={() => {setSelected(name);if(name!=="ANFO")setMaterialViews(current=>({...current,[name]:(view+1)%((name==="DETONADORES"||name==="MECHA DE SEGURIDAD")?3:2)}));}} className="group block w-full text-left" aria-label={`${name}. ${measureHint(name,view)}`}>
                 {name==="DETONADORES"&&<span title="Material de manejo especial" className="absolute right-4 top-4 grid h-7 w-7 place-items-center rounded-full bg-yellow-100 text-yellow-700"><AlertTriangle className="h-4 w-4" aria-label="Precaución"/></span>}
                 <span className="flex items-center justify-between gap-2 pr-7 text-base font-bold leading-tight">{name}<ChevronRight className="h-4 w-4 shrink-0 text-slate-400 transition group-hover:translate-x-1" /></span>
-                <span className="mt-3 grid grid-cols-[4.5rem_1fr] items-stretch gap-3">
+                <span className="mt-3 grid grid-cols-[5.25rem_1fr] items-stretch gap-3">
                   <span className={`module-icon module-icon-${tone}`}><MaterialIcon name={name}/></span>
-                  <span className="grid content-center gap-1.5 text-xs text-slate-600">
-                    <span className="flex items-start justify-between gap-2"><span className="font-semibold uppercase tracking-wide text-slate-500">Total</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,available.length,view)}</strong></span>
-                    <span className="flex items-start justify-between gap-2"><span>Existencia</span><strong className="text-right tabular-nums text-slate-900">{inventoryMeasure(name,locationCount,view)}</strong></span>
+                  <span className="grid content-center justify-items-end text-right">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Total</span>
+                    <strong className="mt-1 text-2xl leading-none tabular-nums text-slate-950">{inventoryMeasure(name,available.length,view)}</strong>
                   </span>
                 </span>
-                <span className="mt-3 block border-t border-slate-100 pt-2 text-center text-[10px] font-bold tracking-[0.12em] text-slate-500">{inventoryUnit(name,view)}</span>
+                <span className="mt-3 flex items-baseline justify-center gap-1.5 border-t border-slate-100 pt-2 text-center"><strong className="text-lg tabular-nums text-slate-950">{inventoryMeasure(name,locationCount,view)}</strong><span className="text-xs font-bold tracking-[0.1em] text-slate-700">{inventoryUnit(name,view)}</span></span>
               </button>
               <div className="mt-3 grid grid-cols-2 rounded-lg bg-slate-100 p-1" role="group" aria-label={`Ubicación para ${name}`}>
                 <button type="button" onClick={()=>{setSelected(name);setMaterialLocations(current=>({...current,[name]:"interior"}));}} className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${location==="interior"?"bg-white text-[#0d2c3e] shadow-sm":"text-slate-500 hover:text-slate-800"}`}>Polvorín</button>
