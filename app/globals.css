@@ -101,7 +101,7 @@ body {
 }
 
 .module-icon { display: grid; height: 2.5rem; width: 2.5rem; place-items: center; border-radius: 0.75rem; }
-.module-icon-orange { background: #fff7ed; color: #c2410c; }
-.module-icon-amber { background: #fffbeb; color: #b45309; }
-.module-icon-blue { background: #eff6ff; color: #1d4ed8; }
-.module-icon-red { background: #fef2f2; color: #b91c1c; }
+.module-icon-green { background: #dcfce7; color: #166534; }
+.module-icon-pink { background: #fce7f3; color: #9d174d; }
+.module-icon-black { background: #111827; color: #ffffff; }
+.module-icon-pale-yellow { background: #fef9c3; color: #6b7280; }
