@@ -12,10 +12,10 @@ import { InstallAppButton } from "@/components/install-app-button";
 import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout, pendingOperations } from "@/lib/backend";
 
 const modules = [
-  { name: "INDUGEL", detail: "Seriales y ubicación", icon: Bomb, tone: "orange" },
-  { name: "ANFO", detail: "Seriales y ubicación", icon: Archive, tone: "amber" },
-  { name: "MECHA DE SEGURIDAD", detail: "Cajas, bobinas y rangos", icon: Cable, tone: "blue" },
-  { name: "DETONADORES", detail: "Cajas y lotes", icon: ShieldCheck, tone: "red" },
+  { name: "INDUGEL", detail: "Seriales y ubicación", icon: Bomb, tone: "green" },
+  { name: "ANFO", detail: "Seriales y ubicación", icon: Archive, tone: "pink" },
+  { name: "MECHA DE SEGURIDAD", detail: "Cajas, bobinas y rangos", icon: Cable, tone: "black" },
+  { name: "DETONADORES", detail: "Cajas y lotes", icon: ShieldCheck, tone: "pale-yellow" },
 ] as const;
 
 export default function Home() {
