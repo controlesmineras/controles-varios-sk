@@ -188,8 +188,8 @@ export default function Home() {
                 <span className="mt-3 grid justify-items-center border-t border-slate-100 pt-2 text-center"><strong className="text-xl leading-none tabular-nums text-slate-950">{inventoryMeasure(name,locationCount,view)}</strong><span className="mt-1 text-xs font-bold tracking-[0.1em] text-slate-700">{inventoryUnit(name,view)}</span></span>
               </button>
               <div className="mt-3 grid grid-cols-2 rounded-lg bg-slate-100 p-1" role="group" aria-label={`Ubicación para ${name}`}>
-                <button type="button" onClick={()=>{setSelected(name);setMaterialLocations(current=>({...current,[name]:"interior"}));}} className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${location==="interior"?"bg-white text-[#0d2c3e] shadow-sm":"text-slate-500 hover:text-slate-800"}`}>Polvorín</button>
                 <button type="button" onClick={()=>{setSelected(name);setMaterialLocations(current=>({...current,[name]:"surface"}));}} className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${location==="surface"?"bg-white text-[#0d2c3e] shadow-sm":"text-slate-500 hover:text-slate-800"}`}>Almacén</button>
+                <button type="button" onClick={()=>{setSelected(name);setMaterialLocations(current=>({...current,[name]:"interior"}));}} className={`rounded-md px-2 py-1.5 text-[11px] font-semibold transition ${location==="interior"?"bg-white text-[#0d2c3e] shadow-sm":"text-slate-500 hover:text-slate-800"}`}>Polvorín</button>
               </div>
             </div>
           )})}
