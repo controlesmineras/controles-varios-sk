@@ -100,8 +100,8 @@ body {
   font-family: Arial, Helvetica, sans-serif;
 }
 
-.module-icon { display: grid; height: 4.5rem; width: 4.5rem; place-items: center; border-radius: 1rem; }
-.module-icon svg { height: 3.25rem; width: 3.75rem; }
+.module-icon { display: grid; height: 5.25rem; width: 5.25rem; place-items: center; border-radius: 1.1rem; }
+.module-icon svg { height: 3.85rem; width: 4.45rem; }
 .module-icon-green { background: #dcfce7; color: #166534; }
 .module-icon-pink { background: #fce7f3; color: #9d174d; }
 .module-icon-black { background: #111827; color: #ffffff; }
