@@ -26,7 +26,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="es">
-      <body className="antialiased"><Script src="/controles-varios-sk/config.js?v=20260920-2" strategy="beforeInteractive" />{children}</body>
+      <body className="antialiased"><Script src="/controles-varios-sk/install-prompt.js?v=1" strategy="beforeInteractive" /><Script src="/controles-varios-sk/config.js?v=20260920-2" strategy="beforeInteractive" />{children}</body>
     </html>
   );
 }
