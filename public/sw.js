@@ -1,4 +1,4 @@
-const CACHE="control-explosivos-shell-v2";
-self.addEventListener("install",event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(["/controles-varios-sk/","/controles-varios-sk/manifest.webmanifest","/controles-varios-sk/favicon.svg"]).catch(()=>undefined)).then(()=>self.skipWaiting())));
+const CACHE="control-explosivos-shell-v3";
+self.addEventListener("install",event=>event.waitUntil(caches.open(CACHE).then(cache=>cache.addAll(["/controles-varios-sk/","/controles-varios-sk/manifest.webmanifest","/controles-varios-sk/favicon.svg","/controles-varios-sk/icon-192.png","/controles-varios-sk/icon-512.png"]).catch(()=>undefined)).then(()=>self.skipWaiting())));
 self.addEventListener("activate",event=>event.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(key=>key!==CACHE).map(key=>caches.delete(key)))).then(()=>self.clients.claim())));
 self.addEventListener("fetch",event=>{if(event.request.method!=="GET"||new URL(event.request.url).origin!==self.location.origin)return;event.respondWith(fetch(event.request).then(response=>{if(response.ok){const copy=response.clone();caches.open(CACHE).then(cache=>cache.put(event.request,copy));}return response;}).catch(()=>caches.match(event.request).then(cached=>cached||caches.match("/controles-varios-sk/"))));});
