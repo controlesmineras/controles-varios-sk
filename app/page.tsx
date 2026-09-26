@@ -1,8 +1,9 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Archive, Check, Loader2, LogOut, MapPin, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, Check, Info, Loader2, LogOut, MapPin, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { RecordDialog } from "@/components/record-dialog";
 import { AccessDialog } from "@/components/access-dialog";
@@ -158,7 +159,7 @@ export default function Home() {
             <h1 className="text-3xl font-semibold tracking-tight sm:text-4xl">EXPLOSIVOS Y ACCESORIOS</h1>
             <div className="mt-4 flex flex-wrap gap-3"><RecordDialog initialType="INDUGEL" onSaved={async result=>{await loadRecords();if(result?.loteIngreso)setVerificationSignal(value=>value+1);}} triggerLabel="REGISTRAR INGRESOS" triggerClassName="h-12 bg-[#0d2c3e] px-5 font-semibold text-white hover:bg-[#16445d]"/><MovementDialog records={records} onSaved={loadRecords}/><VerificationDialog records={records} onSaved={loadRecords} autoOpenSignal={verificationSignal}/></div>
           </div>
-          <div className="grid min-w-64 gap-2"><label className="relative block">
+          <div className="grid min-w-64 gap-2"><div className="flex items-center justify-between"><span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Buscar y filtrar</span><Dialog><DialogTrigger asChild><Button type="button" variant="ghost" size="icon" className="h-8 w-8 rounded-full text-[#0d2c3e]" aria-label="Información sobre los filtros del inventario" title="¿Para qué sirven estos filtros?"><Info className="h-5 w-5"/></Button></DialogTrigger><DialogContent className="sm:max-w-md"><DialogHeader><DialogTitle>BUSCAR Y FILTRAR INVENTARIO</DialogTitle></DialogHeader><div className="space-y-3 text-sm text-slate-700"><p><b>Buscar:</b> encuentra registros por serial, número de caja o lote.</p><p><b>Fecha:</b> muestra los registros ingresados en ese día. Si queda vacía, muestra todas las fechas.</p><p><b>Todos / Verificados / Pendientes:</b> muestra todos los registros o solo los que ya fueron verificados o están pendientes de verificación.</p><p>Los filtros se aplican al material que selecciones abajo.</p></div></DialogContent></Dialog></div><label className="relative block">
             <span className="sr-only">Buscar registros</span>
             <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
             <Input value={query} onChange={(event) => setQuery(event.target.value)} className="h-11 bg-white pl-10" placeholder="Buscar serial, caja o lote" />
