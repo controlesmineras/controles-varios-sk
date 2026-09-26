@@ -1,1 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#0d2c3e"/><path d="M32 9 50 16v14c0 12-7 21-18 26C21 51 14 42 14 30V16l18-7Z" fill="#f5b51b"/><path d="m23 31 6 6 12-13" fill="none" stroke="#0d2c3e" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">Control Explosivos SK</title>
+  <desc id="desc">Cartucho minero dorado en diagonal con destello sobre azul SK.</desc>
+  <rect width="512" height="512" rx="108" fill="#0d2c3e"/>
+  <g transform="rotate(-35 256 256)">
+    <path d="M106 206h300a28 28 0 0 1 28 28v44a28 28 0 0 1-28 28H106a28 28 0 0 1-28-28v-44a28 28 0 0 1 28-28Z" fill="#f5b51b"/>
+    <path d="M104 218h300a16 16 0 0 1 16 16v8H88v-8a16 16 0 0 1 16-16Z" fill="#ffdb70"/>
+    <path d="M118 206v100M192 206v100M350 206v100" stroke="#0d2c3e" stroke-width="18"/>
+    <path d="M102 278h322" stroke="#d98912" stroke-width="8" opacity=".55"/>
+    <path d="M430 244h24" stroke="#ffdb70" stroke-width="12" stroke-linecap="round"/>
+  </g>
+  <g fill="none" stroke="#f5b51b" stroke-width="13" stroke-linecap="round">
+    <path d="M380 95v28M380 189v24M321 154h25M414 154h28M338 112l18 18M404 177l19 19M421 112l-18 18"/>
+  </g>
+  <circle cx="380" cy="154" r="13" fill="#ffdb70"/>
+</svg>

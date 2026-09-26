@@ -5,15 +5,15 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "CONTROL EXPLOSIVOS SK",
   description: "Control de inventario, ubicación y sellos de seguridad.",
-  manifest: "/controles-varios-sk/manifest.webmanifest?v=3",
+  manifest: "/controles-varios-sk/manifest.webmanifest?v=5",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "EXPLOSIVOS SK" },
   other: {
     "codex-preview": "development",
   },
   icons: {
-    icon: "/controles-varios-sk/favicon.svg",
-    shortcut: "/controles-varios-sk/favicon.svg",
-    apple: "/controles-varios-sk/icon-192.png",
+    icon: "/controles-varios-sk/favicon.svg?v=5",
+    shortcut: "/controles-varios-sk/favicon.svg?v=5",
+    apple: "/controles-varios-sk/icon-192.png?v=5",
   },
 };
 
