@@ -172,7 +172,8 @@ function move_(body,usuario,operationId) {
     const tipo=required_(body.tipo,"tipo"); if(tipo==="SELLOS"||!db.records[tipo])throw new Error("Tipo de material no válido.");
     const item=db.records[tipo].find(x=>x.id===required_(body.id,"registro")); if(!item)throw new Error("Registro no encontrado."); if((tipo==="INDUGEL"||tipo==="ANFO")&&item.verificado===false)throw new Error("El serial debe verificarse antes de registrar movimientos.");
     const destino=required_(body.ubicacion,"ubicación"); if(APP.locations.indexOf(destino)<0)throw new Error("Ubicación no válida."); if(item.ubicacion===destino)throw new Error("El material ya se encuentra en esa ubicación.");
-    item.movimientos=item.movimientos||[]; item.movimientos.unshift({fecha:iso_(),origen:item.ubicacion,destino:destino,usuario:usuario}); item.ubicacion=destino;
+    const fecha=body.fechaMovimiento||iso_(); if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(fecha)||!isFinite(new Date(fecha).getTime()))throw new Error("La fecha y hora del movimiento no son válidas.");
+    item.movimientos=item.movimientos||[]; item.movimientos.unshift({fecha:fecha,origen:item.ubicacion,destino:destino,usuario:usuario}); item.ubicacion=destino;
     markOperation_(db,operationId);return {ok:true};
   });
 }
