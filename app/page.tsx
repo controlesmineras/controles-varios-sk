@@ -97,6 +97,7 @@ export default function Home() {
     }).finally(() => setChecking(false));
   }, []);
   useEffect(() => { if (authenticated) void loadRecords(); }, [authenticated, loadRecords]);
+  useEffect(()=>{const update=()=>{const user=JSON.parse(localStorage.getItem("control_explosivos_user")||"null");setCurrentUser(user);setAuthenticated(Boolean(user&&localStorage.getItem("control_explosivos_token")));if(user)void loadRecords();};const online=()=>{void getStatus();if(authenticated)void loadRecords();};window.addEventListener("explosivos-access-updated",update);window.addEventListener("online",online);return()=>{window.removeEventListener("explosivos-access-updated",update);window.removeEventListener("online",online);};},[authenticated,loadRecords]);
   useEffect(() => {
     const context = (document as Document & { modelContext?: { registerTool?: (tool: object, options?: { signal?: AbortSignal }) => void | Promise<void> } }).modelContext;
     if (!context?.registerTool) return;
