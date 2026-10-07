@@ -117,14 +117,14 @@ function login_(body) {
 function newSession_(db,usuario) {
   const account=db.users.find(u=>u.usuario===usuario); const token=token_()+token_(); const vence=new Date(Date.now()+APP.sessionHours*3600000).toISOString();
   db.sessions=db.sessions.filter(s=>new Date(s.vence).getTime()>Date.now()); db.sessions.push({tokenHash:hash_(token),usuario:usuario,vence:vence});
-  return {ok:true,token:token,usuario:{usuario:usuario,nombre:account.nombre,rol:account.rol},vence:vence};
+  return {ok:true,token:token,usuario:{usuario:usuario,nombre:account.nombre,rol:account.rol,protegido:account.protegido===true},vence:vence};
 }
 
 function requireSession_(token) { return sessionFromDb_(load_(),token); }
 function sessionFromDb_(db,token) {
   if(!token)throw new Error("Debes iniciar sesión."); const key=hash_(String(token)); const session=db.sessions.find(s=>s.tokenHash===key&&new Date(s.vence).getTime()>Date.now());
   if(!session)throw new Error("La sesión venció. Inicia sesión nuevamente."); const account=db.users.find(u=>u.usuario===session.usuario&&u.activo);
-  if(!account)throw new Error("El usuario no está activo."); return {usuario:account.usuario,nombre:account.nombre,rol:account.rol};
+  if(!account)throw new Error("El usuario no está activo."); return {usuario:account.usuario,nombre:account.nombre,rol:account.rol,protegido:account.protegido===true};
 }
 
 function create_(r,usuario,operationId) {
@@ -218,10 +218,11 @@ function publicRecords_(db){return {INDUGEL:db.records.INDUGEL,ANFO:db.records.A
 function operationDone_(db,id){return Boolean(id)&&db.processedOperations.indexOf(String(id))>=0;}
 function markOperation_(db,id){if(!id)return;db.processedOperations.push(String(id));if(db.processedOperations.length>20000)db.processedOperations=db.processedOperations.slice(-10000);}
 function requireAdmin_(u){if(!u||u.rol!=="ADMINISTRADOR")throw new Error("Esta operación requiere rol administrador.");}
-function usersList_(u){requireAdmin_(u);return {ok:true,users:load_().users.map(x=>({usuario:x.usuario,nombre:x.nombre,rol:x.rol,activo:x.activo,protegido:x.protegido===true,creado:x.creado}))};}
-function userCreate_(b,a){requireAdmin_(a);return locked_(db=>{const usuario=required_(b.usuario,"usuario").toLowerCase();if(db.users.some(u=>u.usuario===usuario))throw new Error("Ese usuario ya existe.");const rol=String(b.rol||"OPERADOR").toUpperCase();if(["ADMINISTRADOR","OPERADOR"].indexOf(rol)<0)throw new Error("Rol no válido.");const salt=token_();db.users.push({usuario:usuario,nombre:required_(b.nombre,"nombre"),salt:salt,hash:hash_(salt+password_(b.password)),rol:rol,activo:true,protegido:false,creado:iso_()});return {ok:true};});}
-function userResetPassword_(b,a){requireAdmin_(a);return locked_(db=>{const u=db.users.find(x=>x.usuario===required_(b.usuario,"usuario").toLowerCase());if(!u)throw new Error("Usuario no encontrado.");u.salt=token_();u.hash=hash_(u.salt+password_(b.password));return {ok:true};});}
-function userSetActive_(b,a){requireAdmin_(a);return locked_(db=>{const usuario=required_(b.usuario,"usuario").toLowerCase();const u=db.users.find(x=>x.usuario===usuario);if(!u)throw new Error("Usuario no encontrado.");if((usuario===a.usuario||u.protegido===true)&&b.activo===false)throw new Error("La cuenta administradora principal no puede desactivarse.");u.activo=b.activo===true;return {ok:true};});}
+function requirePrincipal_(u){requireAdmin_(u);if(u.protegido!==true)throw new Error("Solo la cuenta principal puede administrar accesos.");}
+function usersList_(u){requirePrincipal_(u);return {ok:true,users:load_().users.map(x=>({usuario:x.usuario,nombre:x.nombre,rol:x.rol,activo:x.activo,protegido:x.protegido===true,creado:x.creado}))};}
+function userCreate_(b,a){requirePrincipal_(a);return locked_(db=>{const usuario=required_(b.usuario,"usuario").toLowerCase();if(db.users.some(u=>u.usuario===usuario))throw new Error("Ese usuario ya existe.");const rol=String(b.rol||"OPERADOR").toUpperCase();if(["ADMINISTRADOR","OPERADOR"].indexOf(rol)<0)throw new Error("Rol no válido.");const salt=token_();db.users.push({usuario:usuario,nombre:required_(b.nombre,"nombre"),salt:salt,hash:hash_(salt+password_(b.password)),rol:rol,activo:true,protegido:false,creado:iso_()});return {ok:true};});}
+function userResetPassword_(b,a){requirePrincipal_(a);return locked_(db=>{const u=db.users.find(x=>x.usuario===required_(b.usuario,"usuario").toLowerCase());if(!u)throw new Error("Usuario no encontrado.");u.salt=token_();u.hash=hash_(u.salt+password_(b.password));return {ok:true};});}
+function userSetActive_(b,a){requirePrincipal_(a);return locked_(db=>{const usuario=required_(b.usuario,"usuario").toLowerCase();const u=db.users.find(x=>x.usuario===usuario);if(!u)throw new Error("Usuario no encontrado.");if((usuario===a.usuario||u.protegido===true)&&b.activo===false)throw new Error("La cuenta administradora principal no puede desactivarse.");u.activo=b.activo===true;return {ok:true};});}
 
 function locked_(fn){const lock=LockService.getScriptLock();lock.waitLock(30000);try{const db=load_();const result=fn(db);save_(db);return result;}finally{lock.releaseLock();}}
 function common_(r){const ubicacion=required_(r.ubicacion,"ubicación");if(APP.locations.indexOf(ubicacion)<0)throw new Error("Ubicación no válida.");return {fechaIngreso:required_(r.fechaIngreso,"fecha de ingreso"),ubicacion:ubicacion};}
