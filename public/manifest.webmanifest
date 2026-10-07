@@ -10,8 +10,17 @@
   "theme_color": "#0d2c3e",
   "lang": "es",
   "icons": [
-    {"src":"/controles-varios-sk/icon-192.png?v=5","sizes":"192x192","type":"image/png","purpose":"any"},
-    {"src":"/controles-varios-sk/icon-512.png?v=5","sizes":"512x512","type":"image/png","purpose":"any"},
-    {"src":"/controles-varios-sk/favicon.svg?v=5","sizes":"any","type":"image/svg+xml","purpose":"any"}
+    {
+      "src": "/controles-varios-sk/logo-mecha-192.png?v=20261007-2",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/controles-varios-sk/logo-mecha-512.png?v=20261007-2",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
   ]
 }
