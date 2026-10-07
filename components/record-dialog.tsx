@@ -76,7 +76,7 @@ function Bobina({ number }: { number: 1 | 2 }) {
   </div></fieldset>;
 }
 
-export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, triggerClassName }: { initialType?: string; onSaved?: (result?:Record<string,unknown>) => void; triggerLabel?: string; triggerClassName?: string }) {
+export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, triggerClassName, sealMaterial }: { sealMaterial?: "INDUGEL" | "ANFO"; initialType?: string; onSaved?: (result?:Record<string,unknown>) => void; triggerLabel?: string; triggerClassName?: string }) {
   const [open, setOpen] = useState(false);
   const [type, setType] = useState(initialType);
   const [saving, setSaving] = useState(false);
@@ -99,6 +99,7 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
     const form = new FormData(event.currentTarget);
     const payload = Object.fromEntries(form.entries());
     try {
+      if(type==="SELLOS"&&!(["Inventario","Traslado de material","Inspección física"].includes(String(payload.motivo||""))))throw new Error("Selecciona el motivo del cambio de precinto.");
       let result:Record<string,unknown>;
       if(batchMode&&(type==="INDUGEL"||type==="ANFO")){
         const rangos=Array.from({length:rangeCount},(_,index)=>({desde:form.get(`rangoDesde${index}`),hasta:form.get(`rangoHasta${index}`)}));
@@ -114,7 +115,7 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
   return <Dialog open={open} onOpenChange={setOpen}>
     <DialogTrigger asChild><Button className={triggerClassName || "shrink-0 bg-white text-[#0d2c3e] hover:bg-slate-100"}><Plus className="h-4 w-4" />{triggerLabel || "NUEVO REGISTRO"}</Button></DialogTrigger>
     <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
-      <DialogHeader><DialogTitle>NUEVO REGISTRO</DialogTitle></DialogHeader>
+      <DialogHeader><DialogTitle>{type === "SELLOS" ? `NUEVO PRECINTO${sealMaterial ? ` ${sealMaterial}` : ""}` : "NUEVO REGISTRO"}</DialogTitle></DialogHeader>
       <form onSubmit={submit} className="space-y-5">
         {choices.length>1&&<div className="space-y-2"><Label>TIPO DE MATERIAL</Label><div className="grid gap-2 sm:grid-cols-2">{choices.map(value=><button key={value} type="button" onClick={()=>{setType(value);setBatchMode(false);setRangeCount(1);}} className={`rounded-lg border px-3 py-3 text-sm font-semibold transition ${type===value?`${materialTone[value]} ring-2 ring-current/15`:"bg-white text-slate-600"}`}>{value}</button>)}</div></div>}
         {(type==="INDUGEL"||type==="ANFO")&&<div className="grid grid-cols-2 rounded-lg border bg-slate-100 p-1"><button type="button" onClick={()=>setBatchMode(false)} className={`rounded-md px-3 py-2 text-sm font-semibold ${!batchMode?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>INGRESO INDIVIDUAL</button><button type="button" onClick={()=>setBatchMode(true)} className={`rounded-md px-3 py-2 text-sm font-semibold ${batchMode?"bg-[#0d2c3e] text-white":"text-slate-600"}`}>INGRESO POR CANTIDAD</button></div>}
@@ -122,7 +123,7 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
           {(type === "INDUGEL" || type === "ANFO") && <>{batchMode?<BatchRanges count={rangeCount} setCount={setRangeCount}/>:<Field name="serial" label="SERIAL" type="number" />}<AutoExpiryDates {...manufacturingDateProps}/><CommonFields {...entryDateProps}/></>}
           {type === "DETONADORES" && <><Field name="cajaNumero" label="CAJA No." /><Field name="contenido" label="CONTENIDO" /><Field name="loteProduccion" label="LOTE DE PRODUCCIÓN" /><Field name="fechaProduccion" label="FECHA DE PRODUCCIÓN" type="date" /><Field name="fechaVencimiento" label="FECHA DE VENCIMIENTO" type="date" /><CommonFields {...entryDateProps}/></>}
           {type === "MECHA DE SEGURIDAD" && <><Field name="cajaNumero" label="CAJA No." /><Field name="cantidad" label="CANTIDAD" type="number" /><Field name="contenido" label="CONTENIDO" /><AutoExpiryDates {...manufacturingDateProps}/><CommonFields {...entryDateProps}/><Bobina number={1} /><Bobina number={2} /></>}
-          {type === "SELLOS" && <><Field name="fecha" label="FECHA" type="date" /><Field name="selloIndugel" label="PRECINTO INDUGEL" /><Field name="selloAnfo" label="PRECINTO ANFO" /></>}
+          {type === "SELLOS" && <><Field name="fecha" label="FECHA" type="date" />{sealMaterial!=="ANFO"&&<Field name="selloIndugel" label="PRECINTO INDUGEL" />}{sealMaterial!=="INDUGEL"&&<Field name="selloAnfo" label="PRECINTO ANFO" />}<div className="space-y-1.5 sm:col-span-2"><Label htmlFor={`motivo-${sealMaterial||"precintos"}`}>MOTIVO</Label><select id={`motivo-${sealMaterial||"precintos"}`} name="motivo" required defaultValue="" className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm"><option value="" disabled>Seleccionar motivo</option><option>Inventario</option><option>Traslado de material</option><option>Inspección física</option></select></div></>}
         </div>
         {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         <div className="flex justify-end gap-3"><Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button><Button type="submit" disabled={saving}>{saving && <Loader2 className="h-4 w-4 animate-spin" />}Guardar registro</Button></div>

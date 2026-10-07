@@ -71,7 +71,7 @@ function save_(db) {
 function status_(token) {
   const db = load_(); let current = null;
   try { current = sessionFromDb_(db, token); } catch (_) {}
-  return { ok: true, apiVersion: 4, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
+  return { ok: true, apiVersion: 5, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
 }
 
 function sync_(operations,user) {
@@ -90,7 +90,7 @@ function sync_(operations,user) {
     else throw new Error("Operación pendiente no reconocida: "+action);
     processed.push(id);
   });
-  return {ok:true,apiVersion:4,processed:processed,records:publicRecords_(load_())};
+  return {ok:true,apiVersion:5,processed:processed,records:publicRecords_(load_())};
 }
 
 function bootstrap_(body) {
@@ -132,7 +132,15 @@ function create_(r,usuario,operationId) {
     if(type==="INDUGEL"||type==="ANFO") { const serial=number_(r.serial,"serial"); unique_(db.records[type],"serial",serial); const fabricacion=required_(r.fechaFabricacion,"fecha de fabricación"); const vencimiento=required_(r.fechaVencimiento,"fecha de vencimiento"); item=Object.assign(base,{serial:serial,fechaFabricacion:fabricacion,fechaVencimiento:vencimiento,verificado:true,fechaVerificacion:iso_(),verificadoPor:usuario,movimientos:[]},common_(r)); }
     else if(type==="DETONADORES") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); item=Object.assign(base,{cajaNumero:caja,contenido:required_(r.contenido,"contenido"),loteProduccion:required_(r.loteProduccion,"lote"),fechaProduccion:required_(r.fechaProduccion,"fecha de producción"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento"),movimientos:[]},common_(r)); }
     else if(type==="MECHA DE SEGURIDAD") { const caja=required_(r.cajaNumero,"caja"); unique_(db.records[type],"cajaNumero",caja); const ranges={bobina1Inicial1:number_(r.bobina1Inicial1,"serial"),bobina1Final1:number_(r.bobina1Final1,"serial"),bobina1Inicial2:optionalNumber_(r.bobina1Inicial2),bobina1Final2:optionalNumber_(r.bobina1Final2),bobina2Inicial1:number_(r.bobina2Inicial1,"serial"),bobina2Final1:number_(r.bobina2Final1,"serial"),bobina2Inicial2:optionalNumber_(r.bobina2Inicial2),bobina2Final2:optionalNumber_(r.bobina2Final2)}; range_(ranges.bobina1Inicial1,ranges.bobina1Final1);rangeOptional_(ranges.bobina1Inicial2,ranges.bobina1Final2);range_(ranges.bobina2Inicial1,ranges.bobina2Final1);rangeOptional_(ranges.bobina2Inicial2,ranges.bobina2Final2); item=Object.assign(base,{cajaNumero:caja,cantidad:number_(r.cantidad,"cantidad"),contenido:required_(r.contenido,"contenido"),fechaFabricacion:required_(r.fechaFabricacion,"fecha de fabricación"),fechaVencimiento:required_(r.fechaVencimiento,"fecha de vencimiento"),movimientos:[]},common_(r),ranges); }
-    else { item=Object.assign(base,{fecha:required_(r.fecha,"fecha"),selloIndugel:required_(r.selloIndugel,"precinto Indugel"),selloAnfo:required_(r.selloAnfo,"precinto Anfo")}); }
+    else {
+      const selloIndugel=String(r.selloIndugel||"").trim(),selloAnfo=String(r.selloAnfo||"").trim();
+      if(!selloIndugel&&!selloAnfo)throw new Error("Ingresa el número del precinto.");
+      const motivo=String(r.motivo||"").trim();
+      // Admitir operaciones de la versión anterior que ya estaban pendientes.
+      if(!motivo&&!(selloIndugel&&selloAnfo))throw new Error("Selecciona el motivo del cambio de precinto.");
+      if(motivo&&["Inventario","Traslado de material","Inspección física"].indexOf(motivo)<0)throw new Error("Motivo de precinto no válido.");
+      item=Object.assign(base,{fecha:required_(r.fecha,"fecha"),selloIndugel:selloIndugel,selloAnfo:selloAnfo,motivo:motivo});
+    }
     db.records[type].unshift(item); markOperation_(db,operationId); return {ok:true,id:item.id};
   });
 }
