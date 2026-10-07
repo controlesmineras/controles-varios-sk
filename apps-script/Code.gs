@@ -28,6 +28,8 @@ function doPost(e) {
     if (action === "bootstrap") return json_(bootstrap_(body));
     if (action === "login") return json_(login_(body));
     const user = requireSession_(body.token);
+    if (action === "sealPeople") return json_(sealPeople_());
+    if (action === "externalUpsert") return json_(externalUpsert_(body.person,user.usuario,body.operationId));
     if (action === "list") return json_({ ok: true, records: publicRecords_(load_()) });
     if (action === "sync") return json_(sync_(body.operations || [], user));
     if (action === "create") return json_(create_(body.record || {}, user.usuario, body.operationId));
@@ -56,7 +58,7 @@ function load_() {
   }
   try {
     const db = JSON.parse(DriveApp.getFileById(id).getBlob().getDataAsString("UTF-8"));
-    db.records = db.records || emptyDb_().records; db.users = db.users || []; db.sessions = db.sessions || []; db.processedOperations=db.processedOperations||[];db.deletedRecords=db.deletedRecords||[];
+    db.records = db.records || emptyDb_().records; db.users = db.users || []; db.sessions = db.sessions || []; db.processedOperations=db.processedOperations||[];db.deletedRecords=db.deletedRecords||[];db.externalPeople=db.externalPeople||[];
     if(db.users.length&&!db.users.some(u=>u.protegido===true))db.users[0].protegido=true;
     return db;
   } catch (_) { throw new Error("No se pudo leer la base privada. Verifica que el archivo no haya sido eliminado."); }
@@ -71,7 +73,7 @@ function save_(db) {
 function status_(token) {
   const db = load_(); let current = null;
   try { current = sessionFromDb_(db, token); } catch (_) {}
-  return { ok: true, apiVersion: 5, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
+  return { ok: true, apiVersion: 6, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
 }
 
 function sync_(operations,user) {
@@ -82,7 +84,8 @@ function sync_(operations,user) {
     const id=required_(operation&&operation.id,"operación");
     const action=required_(operation&&operation.action,"acción");
     const data=operation.data||{};
-    if(action==="create")create_(data.record||{},user.usuario,id);
+    if(action==="externalUpsert")externalUpsert_(data.person,user.usuario,id);
+    else if(action==="create")create_(data.record||{},user.usuario,id);
     else if(action==="createBatch")createBatch_(data.batch||{},user.usuario,id);
     else if(action==="verifyBatch")verifyBatch_(data,user.usuario,id);
     else if(action==="move")move_(data,user.usuario,id);
@@ -90,7 +93,7 @@ function sync_(operations,user) {
     else throw new Error("Operación pendiente no reconocida: "+action);
     processed.push(id);
   });
-  return {ok:true,apiVersion:5,processed:processed,records:publicRecords_(load_())};
+  return {ok:true,apiVersion:6,processed:processed,records:publicRecords_(load_())};
 }
 
 function bootstrap_(body) {
@@ -139,7 +142,18 @@ function create_(r,usuario,operationId) {
       // Admitir operaciones de la versión anterior que ya estaban pendientes.
       if(!motivo&&!(selloIndugel&&selloAnfo))throw new Error("Selecciona el motivo del cambio de precinto.");
       if(motivo&&["Inventario","Traslado de material","Inspección física"].indexOf(motivo)<0)throw new Error("Motivo de precinto no válido.");
-      item=Object.assign(base,{fecha:required_(r.fecha,"fecha"),selloIndugel:selloIndugel,selloAnfo:selloAnfo,motivo:motivo});
+      const account=db.users.find(function(u){return u.usuario===usuario;});
+      item=Object.assign(base,{fecha:required_(r.fecha,"fecha"),selloIndugel:selloIndugel,selloAnfo:selloAnfo,motivo:motivo,registradoPor:{usuario:usuario,nombre:account&&account.nombre||usuario}});
+      if(r.sealSchema===2){
+        const funcionario=sealPerson_(r.funcionarioSeguridad),asistentes=(Array.isArray(r.asistentes)?r.asistentes:[]).map(sealPerson_);
+        const docs=[funcionario.documento].concat(asistentes.map(function(p){return p.documento;}));
+        if(new Set(docs).size!==docs.length)throw new Error("Una persona no puede figurar dos veces en el registro.");
+        const fecha=required_(r.fechaNovedad,"fecha y hora de la novedad");
+        if(!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00-05:00$/.test(fecha)||!Number.isFinite(Date.parse(fecha)))throw new Error("Fecha y hora de novedad no válidas.");
+        const local=new Date(Date.parse(fecha)-5*3600000).toISOString().slice(0,16);
+        if(local!==fecha.slice(0,16)||r.fecha!==fecha.slice(0,10)||r.hora!==fecha.slice(11,16))throw new Error("Fecha y hora de novedad no válidas.");
+        Object.assign(item,{sealSchema:2,fechaNovedad:fecha,hora:r.hora,funcionarioSeguridad:funcionario,asistentes:asistentes});
+      }
     }
     db.records[type].unshift(item); markOperation_(db,operationId); return {ok:true,id:item.id};
   });
@@ -194,7 +208,7 @@ function deleteRecord_(body,user,operationId) {
     const id=required_(body.id,"registro");const index=db.records[tipo].findIndex(function(item){return String(item.id)===id;});
     if(index<0)throw new Error("El registro que intentas eliminar ya no existe.");
     const removed=db.records[tipo].splice(index,1)[0];
-    db.deletedRecords=db.deletedRecords||[];db.deletedRecords.unshift({tipo:tipo,registro:removed,eliminadoPor:user.usuario,fechaEliminacion:iso_()});
+    db.deletedRecords=db.deletedRecords||[];db.externalPeople=db.externalPeople||[];db.deletedRecords.unshift({tipo:tipo,registro:removed,eliminadoPor:user.usuario,fechaEliminacion:iso_()});
     if(db.deletedRecords.length>5000)db.deletedRecords=db.deletedRecords.slice(0,5000);
     markOperation_(db,operationId);return {ok:true,id:id};
   });
@@ -222,3 +236,21 @@ function token_(){return Utilities.getUuid().replace(/-/g,"");}
 function hash_(text){return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256,text,Utilities.Charset.UTF_8).map(b=>(b+256)%256).map(b=>("0"+b.toString(16)).slice(-2)).join("");}
 function iso_(){return new Date().toISOString();}
 function json_(v){return ContentService.createTextOutput(JSON.stringify(v)).setMimeType(ContentService.MimeType.JSON);}
+
+// Consulta de Personal: solo lectura, limitada a los datos de participación.
+function centralSealPeople_(){
+  const explicit=PropertiesService.getScriptProperties().getProperty("SK_PERSONAL_FILE_ID");let file;
+  if(explicit)file=DriveApp.getFileById(explicit);
+  else {const files=DriveApp.getFilesByName("sk-web-central.json"),matches=[];while(files.hasNext())matches.push(files.next());if(matches.length!==1)throw new Error("Configura SK_PERSONAL_FILE_ID con el archivo central de SK Admin para consultar Personal.");file=matches[0];}
+  const data=JSON.parse(file.getBlob().getDataAsString("UTF-8"));
+  if(!Array.isArray(data.personal))throw new Error("La base central no contiene Personal.");
+  return data.personal.filter(function(p){return p&&!p.deleted;}).map(function(p){return {documento:String(p.documento||"").trim(),nombre:String(p.nombre||[p.primerNombre,p.segundoNombre,p.primerApellido,p.segundoApellido].filter(Boolean).join(" ")).trim(),cargo:String(p.cargo||"No informado"),empresa:String(p.empresa||""),area:String(p.area||""),origen:"SK Admin"};}).filter(function(p){return p.documento&&p.nombre;});
+}
+function sealPerson_(p){p=p||{};return {documento:required_(p.documento,"documento del participante"),nombre:required_(p.nombre,"nombre del participante"),cargo:required_(p.cargo,"cargo del participante"),empresa:required_(p.empresa,"empresa del participante"),area:String(p.area||""),origen:p.origen==="SK Admin"?"SK Admin":"Externo"};}
+function sealPeople_(){let internal=[],warning="";try{internal=centralSealPeople_();}catch(error){warning=String(error.message||error);}return {ok:true,internal:internal,external:load_().externalPeople||[],warning:warning};}
+function externalUpsert_(p,usuario,operationId){
+ const person=sealPerson_(p);person.origen="Externo";
+ let internal=[];try{internal=centralSealPeople_();}catch(_){}
+ if(internal.some(function(row){return row.documento===person.documento;}))throw new Error("El documento ya pertenece a Personal de SK Admin.");
+ return locked_(function(db){if(operationDone_(db,operationId))return {ok:true,repeated:true};db.externalPeople=db.externalPeople||[];const existing=db.externalPeople.find(function(row){return row.documento===person.documento;});const now=iso_();if(existing)Object.assign(existing,person,{updatedAt:now,updatedBy:usuario});else db.externalPeople.push(Object.assign({},person,{createdAt:now,createdBy:usuario}));markOperation_(db,operationId);return {ok:true,person:person};});
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import {SealHistory} from "@/components/seal-history";
 import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Archive, Check, Info, Loader2, LogOut, MapPin, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -200,10 +201,10 @@ export default function Home() {
         <section className="mt-7">
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
-              <div><h2 className="text-lg font-semibold">{selected === "SELLOS" ? "PRECINTOS" : selected}</h2><p className="text-sm text-slate-500">{selected === "SELLOS" ? "Registros disponibles" : `Registros en ${selectedLocationLabel}`}</p></div>
+              <div><h2 className="text-lg font-semibold">{selected === "SELLOS" ? "REGISTROS DE NOVEDADES DE PRECINTOS" : selected}</h2><p className="text-sm text-slate-500">{selected === "SELLOS" ? "Registros disponibles" : `Registros en ${selectedLocationLabel}`}</p></div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">{selectedRecords.length} registros</span>
             </div>
-            {selectedRecords.length === 0 ? <div className="grid min-h-56 place-items-center px-6 py-10 text-center">
+            {selected === "SELLOS" ? <SealHistory records={selectedRecords}/> : selectedRecords.length === 0 ? <div className="grid min-h-56 place-items-center px-6 py-10 text-center">
               <div><Archive className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-3 font-medium">No hay registros de {selected === "SELLOS" ? "PRECINTOS" : `${selected} en ${selectedLocationLabel}`}</p><p className="mt-1 text-sm text-slate-500">{selected === "SELLOS" ? "Los precintos registrados aparecerán aquí." : "Se muestran los elementos que están actualmente en este lugar y coinciden con los filtros."}</p></div>
             </div> : <div className="divide-y divide-slate-100">{selectedRecords.map((record) => {const subtitle=selected==="SELLOS"?[record.selloIndugel?`Precinto Indugel: ${String(record.selloIndugel)}`:"",record.selloAnfo?`Precinto ANFO: ${String(record.selloAnfo)}`:"",record.fecha,record.motivo].filter(Boolean).join(" · "):selected==="MECHA DE SEGURIDAD"?`${String(record.cantidad||record.contenido||2)} bobinas`:String(record.loteProduccion||record.contenido||"");return <article key={String(record.id)} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{String(record.serial || record.cajaNumero || `Registro ${record.id}`)}</p>{record.verificado===false&&<span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">PENDIENTE DE VERIFICAR</span>}</div>{subtitle&&<p className="text-sm text-slate-500">{subtitle}</p>}{selected!=="SELLOS"&&<p className="mt-1 text-xs text-slate-500">Ingreso: {String(record.fechaIngreso||"")} · Fabricación: {String(record.fechaFabricacion||record.fechaProduccion||"")} · Vencimiento: {String(record.fechaVencimiento||"")}</p>}</div>{selected!=="SELLOS"&&<div className="flex items-center gap-3 sm:justify-end"><span className="flex items-center gap-2 text-sm text-slate-600"><MapPin className="h-4 w-4" />{String(record.ubicacion||"")}</span>{currentUser?.rol==="ADMINISTRADOR"&&<Button type="button" variant="outline" size="sm" onClick={()=>void removeRecord(record)} className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800" title={`Eliminar ${String(record.serial||record.cajaNumero||record.id)}`}><Trash2 className="h-4 w-4"/><span className="hidden lg:inline">Eliminar</span></Button>}</div>}</article>})}</div>}
           </div>

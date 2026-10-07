@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {SealParticipants} from "@/components/seal-participants";
+import {sealDate,sealParticipants,type SealPerson} from "@/lib/seal-people";
 import { saveBatchRecords, saveRecord } from "@/lib/backend";
 
 const materialTypes = ["INDUGEL", "ANFO", "MECHA DE SEGURIDAD", "DETONADORES"];
@@ -77,6 +79,8 @@ function Bobina({ number }: { number: 1 | 2 }) {
 }
 
 export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, triggerClassName, sealMaterial }: { sealMaterial?: "INDUGEL" | "ANFO"; initialType?: string; onSaved?: (result?:Record<string,unknown>) => void; triggerLabel?: string; triggerClassName?: string }) {
+  const [officer,setOfficer]=useState<SealPerson|null>(null);
+  const [attendees,setAttendees]=useState<SealPerson[]>([]);
   const [open, setOpen] = useState(false);
   const [type, setType] = useState(initialType);
   const [saving, setSaving] = useState(false);
@@ -97,9 +101,10 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setSaving(true); setError("");
     const form = new FormData(event.currentTarget);
-    const payload = Object.fromEntries(form.entries());
+    const payload:Record<string,unknown> = Object.fromEntries(form.entries());
     try {
       if(type==="SELLOS"&&!(["Inventario","Traslado de material","Inspección física"].includes(String(payload.motivo||""))))throw new Error("Selecciona el motivo del cambio de precinto.");
+      if(type==="SELLOS"){Object.assign(payload,sealParticipants(officer,attendees),{fechaNovedad:sealDate(String(payload.fecha||""),String(payload.hora||"")),sealSchema:2});}
       let result:Record<string,unknown>;
       if(batchMode&&(type==="INDUGEL"||type==="ANFO")){
         const rangos=Array.from({length:rangeCount},(_,index)=>({desde:form.get(`rangoDesde${index}`),hasta:form.get(`rangoHasta${index}`)}));
@@ -112,7 +117,7 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
     finally { setSaving(false); }
   }
 
-  return <Dialog open={open} onOpenChange={setOpen}>
+  return <Dialog open={open} onOpenChange={value=>{setOpen(value);if(value){setOfficer(null);setAttendees([]);setError("");}}}>
     <DialogTrigger asChild><Button className={triggerClassName || "shrink-0 bg-white text-[#0d2c3e] hover:bg-slate-100"}><Plus className="h-4 w-4" />{triggerLabel || "NUEVO REGISTRO"}</Button></DialogTrigger>
     <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
       <DialogHeader><DialogTitle>{type === "SELLOS" ? `NUEVO PRECINTO${sealMaterial ? ` ${sealMaterial}` : ""}` : "NUEVO REGISTRO"}</DialogTitle></DialogHeader>
@@ -123,7 +128,7 @@ export function RecordDialog({ initialType = "INDUGEL", onSaved, triggerLabel, t
           {(type === "INDUGEL" || type === "ANFO") && <>{batchMode?<BatchRanges count={rangeCount} setCount={setRangeCount}/>:<Field name="serial" label="SERIAL" type="number" />}<AutoExpiryDates {...manufacturingDateProps}/><CommonFields {...entryDateProps}/></>}
           {type === "DETONADORES" && <><Field name="cajaNumero" label="CAJA No." /><Field name="contenido" label="CONTENIDO" /><Field name="loteProduccion" label="LOTE DE PRODUCCIÓN" /><Field name="fechaProduccion" label="FECHA DE PRODUCCIÓN" type="date" /><Field name="fechaVencimiento" label="FECHA DE VENCIMIENTO" type="date" /><CommonFields {...entryDateProps}/></>}
           {type === "MECHA DE SEGURIDAD" && <><Field name="cajaNumero" label="CAJA No." /><Field name="cantidad" label="CANTIDAD" type="number" /><Field name="contenido" label="CONTENIDO" /><AutoExpiryDates {...manufacturingDateProps}/><CommonFields {...entryDateProps}/><Bobina number={1} /><Bobina number={2} /></>}
-          {type === "SELLOS" && <><Field name="fecha" label="FECHA" type="date" />{sealMaterial!=="ANFO"&&<Field name="selloIndugel" label="PRECINTO INDUGEL" />}{sealMaterial!=="INDUGEL"&&<Field name="selloAnfo" label="PRECINTO ANFO" />}<div className="space-y-1.5 sm:col-span-2"><Label htmlFor={`motivo-${sealMaterial||"precintos"}`}>MOTIVO</Label><select id={`motivo-${sealMaterial||"precintos"}`} name="motivo" required defaultValue="" className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm"><option value="" disabled>Seleccionar motivo</option><option>Inventario</option><option>Traslado de material</option><option>Inspección física</option></select></div></>}
+          {type === "SELLOS" && <><Field name="fecha" label="FECHA DE LA NOVEDAD" type="date" /><Field name="hora" label="HORA DE LA NOVEDAD" type="time" />{sealMaterial!=="ANFO"&&<Field name="selloIndugel" label="PRECINTO INDUGEL" />}{sealMaterial!=="INDUGEL"&&<Field name="selloAnfo" label="PRECINTO ANFO" />}<div className="space-y-1.5 sm:col-span-2"><Label htmlFor={`motivo-${sealMaterial||"precintos"}`}>MOTIVO</Label><select id={`motivo-${sealMaterial||"precintos"}`} name="motivo" required defaultValue="" className="h-10 w-full rounded-md border border-input bg-transparent px-3 text-sm"><option value="" disabled>Seleccionar motivo</option><option>Inventario</option><option>Traslado de material</option><option>Inspección física</option></select></div><SealParticipants onChange={(person,people)=>{setOfficer(person);setAttendees(people);}}/></>}
         </div>
         {error && <p role="alert" className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
         <div className="flex justify-end gap-3"><Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancelar</Button><Button type="submit" disabled={saving}>{saving && <Loader2 className="h-4 w-4 animate-spin" />}Guardar registro</Button></div>
