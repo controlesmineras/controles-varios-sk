@@ -14,7 +14,6 @@ type InstallWindow=Window&{__explosivosInstallPrompt?:InstallPromptEvent|null};
 export function InstallAppButton(){
   const [prompt,setPrompt]=useState<InstallPromptEvent|null>(null);const [help,setHelp]=useState(false);const [installed,setInstalled]=useState(false);
   useEffect(()=>{
-    if("serviceWorker" in navigator)void navigator.serviceWorker.register("/controles-varios-sk/sw.js");
     const standalone=window.matchMedia("(display-mode: standalone)").matches||(navigator as Navigator&{standalone?:boolean}).standalone===true;setInstalled(standalone);
     const ready=(event:Event)=>{event.preventDefault();setPrompt(event as InstallPromptEvent);};
     const useCaptured=()=>setPrompt((window as InstallWindow).__explosivosInstallPrompt||null);

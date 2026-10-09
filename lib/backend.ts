@@ -8,7 +8,19 @@ export function backendConfigured(){return Boolean(apiUrl());}
 async function request(action:string,data:Record<string,unknown>={}):Promise<ApiResult>{const url=apiUrl();if(!url)throw new Error("La aplicación aún no está conectada al servidor de la empresa.");const token=localStorage.getItem("control_explosivos_token")||"";const body=new URLSearchParams({payload:JSON.stringify({action,token,...data})});const response=await fetch(url,{method:"POST",body,signal:AbortSignal.timeout(15000)});const result=await response.json() as ApiResult;if(!result.ok)throw new Error(result.error||"No se pudo completar la operación.");return result;}
 function useSession(result:ApiResult){localStorage.setItem("control_explosivos_token",result.token);localStorage.setItem("control_explosivos_user",JSON.stringify(result.usuario));return result;}
 async function refreshAccess(token:string){try{const result=await request("status");if(localStorage.getItem("control_explosivos_token")!==token)return;if(result.authenticated&&result.usuario){localStorage.setItem("control_explosivos_user",JSON.stringify(result.usuario));deviceAccess.refresh(token,{token,usuario:result.usuario});window.dispatchEvent(new Event("explosivos-access-updated"));}else if(result.authenticated===false){logout();window.dispatchEvent(new Event("explosivos-access-updated"));}}catch{}}
-export async function getStatus(){const token=localStorage.getItem("control_explosivos_token")||"",user=JSON.parse(localStorage.getItem("control_explosivos_user")||"null");if(token&&user){if(navigator.onLine)void refreshAccess(token);return {ok:true,needsBootstrap:false,authenticated:true,usuario:user,offline:!navigator.onLine,local:true};}return request("status");}
+export async function getStatus(){
+ const token=localStorage.getItem("control_explosivos_token")||"";
+ let user:ApiResult|null=null;
+ try{user=JSON.parse(localStorage.getItem("control_explosivos_user")||"null");}catch{}
+ if(token&&user?.usuario){
+  if(navigator.onLine)void refreshAccess(token);
+  return {ok:true,needsBootstrap:false,authenticated:true,usuario:user,offline:!navigator.onLine,local:true};
+ }
+ const localStatus={ok:true,needsBootstrap:false,authenticated:false,usuario:null,offline:true,local:true};
+ // The sign-in form must also open offline after an explicit logout.
+ if(!navigator.onLine)return localStatus;
+ try{return await request("status");}catch{return localStatus;}
+}
 export async function login(usuario:string,password:string){const cached=await deviceAccess.verify(usuario,password);if(cached){useSession(cached);if(navigator.onLine)void request("login",{usuario,password}).then(async result=>{if(localStorage.getItem("control_explosivos_token")!==cached.token)return;useSession(result);await deviceAccess.remember(usuario,password,{token:result.token,usuario:result.usuario});window.dispatchEvent(new Event("explosivos-access-updated"));}).catch(error=>{if(/contraseña|desactiv|no autorizado|no tiene acceso|credenciales|usuario.*incorrect/i.test(error.message)&&localStorage.getItem("control_explosivos_token")===cached.token){deviceAccess.remove(usuario);logout();window.dispatchEvent(new Event("explosivos-access-updated"));}});return {...cached,ok:true,local:true};}if(!navigator.onLine)throw new Error("Usuario o contraseña no reconocidos en este dispositivo. El primer acceso requiere conexión.");const result=await request("login",{usuario,password});useSession(result);await deviceAccess.remember(usuario,password,{token:result.token,usuario:result.usuario});return result;}
 export async function createInitialAdmin(usuario:string,nombre:string,password:string){const result=await request("bootstrap",{usuario,nombre,password});localStorage.setItem("control_explosivos_token",result.token);localStorage.setItem("control_explosivos_user",JSON.stringify(result.usuario));await deviceAccess.remember(usuario,password,{token:result.token,usuario:result.usuario});return result;}
 export function logout(){localStorage.removeItem("control_explosivos_token");localStorage.removeItem("control_explosivos_user");}
