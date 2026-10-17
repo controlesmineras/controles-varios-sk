@@ -16,3 +16,11 @@ Después de un inicio correcto, el dispositivo guarda la sesión y el verificado
 En una instalación nueva, abre la app instalada con internet e inicia sesión una vez. No basta con haber ingresado desde otro navegador o dispositivo. Borrar los datos del navegador o de la app elimina sus copias locales.
 
 GitHub Pages ejecuta `node scripts/build-offline-shell.mjs` después de `next build`. Si se compila manualmente, se debe ejecutar ese mismo paso antes de publicar `out/`. Las actualizaciones listas se anuncian con ACTUALIZAR APP, para poder guardar primero un registro que esté en edición.
+
+## Confirmación de pendientes
+
+Cada operación conserva su identificador hasta recibir una confirmación explícita y un inventario válido del servidor. Los cambios locales y su pendiente se guardan juntos. Al descargar datos se vuelven a aplicar los cambios todavía pendientes, incluidos los creados durante la sincronización.
+
+La sincronización envía una operación por solicitud usando la API existente. Un rechazo de validación conserva el pendiente y muestra su motivo; los cambios independientes pueden continuar. Los cambios posteriores del mismo registro esperan su confirmación. Los errores de conexión, sesión o respuestas incompletas detienen el envío y conservan lo no confirmado. La fecha de sincronización completa solo se actualiza cuando no quedan pendientes.
+
+Con internet, ingresar espera a que el servidor renueve la sesión. Sin conexión se mantiene el acceso local ya validado. La actualización no borra la base local ni necesita modificar Apps Script si ya está desplegada la API 6.

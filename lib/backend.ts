@@ -1,11 +1,26 @@
 import {createDeviceAccess} from "@/lib/device-access";
 const deviceAccess=createDeviceAccess("explosivos");
 import {sealPerson,type SealPerson} from "@/lib/seal-people";
-import {enqueue,getCachedRecords,getOperations,removeOperation,setCachedRecords,getLocal,setLocal} from "@/lib/offline-store";
+import {enqueue,getCachedRecords,getOperations,acceptSnapshot,getLocal,setLocal} from "@/lib/offline-store";
+import {operationKeys,operationLabel,validateInventory} from "@/lib/sync-state";
+import type {OfflineOperation} from "@/lib/offline-store";
 declare global{interface Window{CONTROL_EXPLOSIVOS_CONFIG?:{apiUrl?:string};}}
-const apiUrl=()=>window.CONTROL_EXPLOSIVOS_CONFIG?.apiUrl?.trim()||"";type ApiResult=Record<string,any>;type Records=Record<string,Array<Record<string,unknown>>>;
+const apiUrl=()=>window.CONTROL_EXPLOSIVOS_CONFIG?.apiUrl?.trim()||"";type ApiResult=Record<string,any>;
 export function backendConfigured(){return Boolean(apiUrl());}
-async function request(action:string,data:Record<string,unknown>={}):Promise<ApiResult>{const url=apiUrl();if(!url)throw new Error("La aplicación aún no está conectada al servidor de la empresa.");const token=localStorage.getItem("control_explosivos_token")||"";const body=new URLSearchParams({payload:JSON.stringify({action,token,...data})});const response=await fetch(url,{method:"POST",body,signal:AbortSignal.timeout(15000)});const result=await response.json() as ApiResult;if(!result.ok)throw new Error(result.error||"No se pudo completar la operación.");return result;}
+class ApiRejection extends Error {}
+async function request(action:string,data:Record<string,unknown>={},expectedToken?:string):Promise<ApiResult>{
+ const url=apiUrl();if(!url)throw new Error("La aplicación aún no está conectada al servidor de la empresa.");
+ const token=localStorage.getItem("control_explosivos_token")||"";
+ if(expectedToken!==undefined&&token!==expectedToken)throw new Error("La sesión cambió. Vuelve a sincronizar con tu sesión actual.");
+ let response:Response;
+ try{response=await fetch(url,{method:"POST",body:new URLSearchParams({payload:JSON.stringify({action,token,...data})}),signal:AbortSignal.timeout(45000)});}
+ catch(error){throw new Error(error instanceof Error&&/Timeout|Abort/.test(error.name)?"El servidor tardó demasiado en responder. Los pendientes se conservan; vuelve a sincronizar.":"No se pudo conectar con el servidor. Los pendientes se conservan; verifica tu conexión.");}
+ if(response.ok===false)throw new Error(`El servidor respondió con error ${response.status}. Los pendientes se conservan.`);
+ let result:ApiResult;try{result=await response.json();}catch{throw new Error("El servidor devolvió una respuesta inválida. Los pendientes se conservan.");}
+ if(!result||result.ok!==true)throw new ApiRejection(result?.error||"No se pudo completar la operación.");
+ if(expectedToken!==undefined&&localStorage.getItem("control_explosivos_token")!==expectedToken)throw new Error("La sesión cambió durante la sincronización. Los pendientes se conservan.");
+ return result;
+}
 function useSession(result:ApiResult){localStorage.setItem("control_explosivos_token",result.token);localStorage.setItem("control_explosivos_user",JSON.stringify(result.usuario));return result;}
 async function refreshAccess(token:string){try{const result=await request("status");if(localStorage.getItem("control_explosivos_token")!==token)return;if(result.authenticated&&result.usuario){localStorage.setItem("control_explosivos_user",JSON.stringify(result.usuario));deviceAccess.refresh(token,{token,usuario:result.usuario});window.dispatchEvent(new Event("explosivos-access-updated"));}else if(result.authenticated===false){logout();window.dispatchEvent(new Event("explosivos-access-updated"));}}catch{}}
 export async function getStatus(){
@@ -21,17 +36,74 @@ export async function getStatus(){
  if(!navigator.onLine)return localStatus;
  try{return await request("status");}catch{return localStatus;}
 }
-export async function login(usuario:string,password:string){const cached=await deviceAccess.verify(usuario,password);if(cached){useSession(cached);if(navigator.onLine)void request("login",{usuario,password}).then(async result=>{if(localStorage.getItem("control_explosivos_token")!==cached.token)return;useSession(result);await deviceAccess.remember(usuario,password,{token:result.token,usuario:result.usuario});window.dispatchEvent(new Event("explosivos-access-updated"));}).catch(error=>{if(/contraseña|desactiv|no autorizado|no tiene acceso|credenciales|usuario.*incorrect/i.test(error.message)&&localStorage.getItem("control_explosivos_token")===cached.token){deviceAccess.remove(usuario);logout();window.dispatchEvent(new Event("explosivos-access-updated"));}});return {...cached,ok:true,local:true};}if(!navigator.onLine)throw new Error("Usuario o contraseña no reconocidos en este dispositivo. El primer acceso requiere conexión.");const result=await request("login",{usuario,password});useSession(result);await deviceAccess.remember(usuario,password,{token:result.token,usuario:result.usuario});return result;}
+export async function login(usuario:string,password:string){
+ const cached=await deviceAccess.verify(usuario,password);
+ if(navigator.onLine){
+  try{const result=await request("login",{usuario,password});useSession(result);await deviceAccess.remember(usuario,password,{token:result.token,usuario:result.usuario});return result;}
+  catch(error){if(error instanceof ApiRejection){if(/contraseña|desactiv|no autorizado|no tiene acceso|credenciales|usuario.*incorrect/i.test(error.message)){deviceAccess.remove(usuario);logout();}throw error;}if(!cached)throw error;}
+ }
+ if(cached){useSession(cached);return {...cached,ok:true,local:true};}
+ throw new Error("Usuario o contraseña no reconocidos en este dispositivo. El primer acceso requiere conexión.");
+}
 export async function createInitialAdmin(usuario:string,nombre:string,password:string){const result=await request("bootstrap",{usuario,nombre,password});localStorage.setItem("control_explosivos_token",result.token);localStorage.setItem("control_explosivos_user",JSON.stringify(result.usuario));await deviceAccess.remember(usuario,password,{token:result.token,usuario:result.usuario});return result;}
 export function logout(){localStorage.removeItem("control_explosivos_token");localStorage.removeItem("control_explosivos_user");}
-export async function synchronize(){const operations=await getOperations();if(operations.length){const status=await request("status"),version=Number(status.apiVersion||0);if(version<6&&operations.some(op=>op.action==="externalUpsert"||(op.action==="create"&&(op.data.record as Record<string,unknown>)?.sealSchema===2)))throw new Error("Actualiza el servidor de Explosivos para sincronizar participantes y externos. Los registros siguen guardados en este dispositivo.");if(version<5&&operations.some(operation=>operation.action==="create"&&(operation.data.record as Record<string,unknown>)?.tipo==="SELLOS"&&(operation.data.record as Record<string,unknown>)?.motivo))throw new Error("Actualiza el servidor de Explosivos para sincronizar los nuevos precintos con su motivo. Los registros siguen guardados en este dispositivo.");if(version<2)throw new Error("El servidor debe actualizarse antes de enviar los registros pendientes.");if(operations.some(operation=>operation.action==="deleteRecord")&&version<4)throw new Error("El servidor debe actualizarse antes de eliminar registros.");if(version>=3){const result=await request("sync",{operations:operations.map(operation=>({id:operation.id,action:operation.action,data:operation.data}))});for(const id of result.processed||[])await removeOperation(String(id));const records=result.records as Records;await setCachedRecords(records);return {records,pending:(await getOperations()).length};}}for(const operation of operations){await request(operation.action,{...operation.data,operationId:operation.id});await removeOperation(operation.id);}const records=(await request("list")).records as Records;await setCachedRecords(records);return {records,pending:(await getOperations()).length};}
-export async function listRecords(){const cached=await getCachedRecords();if(navigator.onLine){try{return (await synchronize()).records;}catch{return cached;}}return cached;}
-async function updateLocal(mutator:(records:Records)=>void){const records=await getCachedRecords();for(const type of ["INDUGEL","ANFO","MECHA DE SEGURIDAD","DETONADORES","SELLOS"])records[type]=records[type]||[];mutator(records);await setCachedRecords(records);}
-export async function saveRecord(record:Record<string,unknown>){const id=crypto.randomUUID();const type=String(record.tipo);const user=JSON.parse(localStorage.getItem("control_explosivos_user")||"{}");const item={...record,...(type==="SELLOS"?{registradoPor:{usuario:user.usuario||"",nombre:user.nombre||user.usuario||""}}:{}),id,fechaRegistro:new Date().toISOString(),...((type==="INDUGEL"||type==="ANFO")?{verificado:true,fechaVerificacion:new Date().toISOString()}:{}),movimientos:[]};await updateLocal(records=>{if((type==="INDUGEL"||type==="ANFO")&&records[type].some(value=>String(value.serial)===String(record.serial)))throw new Error("Ese serial ya está registrado en este dispositivo.");records[type].unshift(item);});await enqueue("create",{record:item});return {ok:true,id,local:true};}
-export async function saveBatchRecords(batch:Record<string,any>){const type=String(batch.tipo);const loteIngreso=crypto.randomUUID();const items:Array<Record<string,unknown>>=[];const generated=new Set<number>();for(const range of batch.rangos||[]){const from=Number(range.desde),to=Number(range.hasta);if(!Number.isFinite(from)||!Number.isFinite(to)||to<from)throw new Error("El rango de seriales no es válido.");for(let serial=from;serial<=to;serial++){if(generated.has(serial))throw new Error(`El serial ${serial} está repetido entre los grupos.`);generated.add(serial);items.push({id:crypto.randomUUID(),serial,tipo:type,fechaFabricacion:batch.fechaFabricacion,fechaVencimiento:batch.fechaVencimiento,fechaIngreso:batch.fechaIngreso,ubicacion:batch.ubicacion,fechaRegistro:new Date().toISOString(),verificado:false,movimientos:[],loteIngreso});}}await updateLocal(records=>{const existing=new Set(records[type].map(value=>Number(value.serial)));const duplicate=items.find(item=>existing.has(Number(item.serial)));if(duplicate)throw new Error(`El serial ${duplicate.serial} ya está registrado en este dispositivo.`);records[type].unshift(...items);});await enqueue("createBatch",{batch:{...batch,items,loteIngreso}});return {ok:true,cantidad:items.length,loteIngreso,local:true};}
-export async function verifyBatchRecords(tipo:string,unidades:Array<Record<string,unknown>>){const ids=new Set(unidades.map(unit=>String(unit.id)));await updateLocal(records=>records[tipo].forEach(item=>{if(ids.has(String(item.id))){const unit=unidades.find(value=>String(value.id)===String(item.id))!;item.fechaFabricacion=unit.fechaFabricacion;item.fechaVencimiento=unit.fechaVencimiento;item.verificado=true;item.fechaVerificacion=new Date().toISOString();}}));await enqueue("verifyBatch",{tipo,unidades});return {ok:true,cantidad:unidades.length,local:true};}
-export async function moveRecord(tipo:string,id:string,ubicacion:string,fechaMovimiento:string){if(!Number.isFinite(Date.parse(fechaMovimiento)))throw new Error("La fecha y hora del movimiento no son válidas.");await updateLocal(records=>{const item=records[tipo].find(value=>String(value.id)===id);if(!item)throw new Error("Registro no encontrado.");const origen=item.ubicacion;item.ubicacion=ubicacion;const movements=(item.movimientos as Array<Record<string,unknown>>)||[];movements.unshift({fecha:fechaMovimiento,origen,destino:ubicacion});item.movimientos=movements;});await enqueue("move",{tipo,id,ubicacion,fechaMovimiento});return {ok:true,local:true};}
-export async function deleteRecord(tipo:string,id:string){await updateLocal(records=>{const index=records[tipo].findIndex(value=>String(value.id)===id);if(index<0)throw new Error("Registro no encontrado.");records[tipo].splice(index,1);});await enqueue("deleteRecord",{tipo,id});return {ok:true,local:true};}
+export type SyncIssue={id:string;label:string;message:string};
+function compatibilityError(operation:OfflineOperation,version:number){
+ const record=operation.data.record as Record<string,unknown>|undefined;
+ if(version<6&&(operation.action==="externalUpsert"||record?.sealSchema===2))return "Actualiza el servidor de Explosivos para sincronizar participantes y externos.";
+ if(version<5&&record?.tipo==="SELLOS"&&record?.motivo)return "Actualiza el servidor de Explosivos para sincronizar precintos con su motivo.";
+ if(version<4&&operation.action==="deleteRecord")return "Actualiza el servidor de Explosivos para sincronizar eliminaciones.";
+ return "";
+}
+function independentRejection(error:unknown){
+ return error instanceof ApiRejection&&/ya existe|ya está registrado|ya se encuentra|no se encontró|no encontrado|ya no existe|no puede figurar dos veces|debe verificarse|campo .* obligatorio|no (?:es )?válid|no reconocido|rango|seriales|requiere rol administrador|documento ya pertenece/i.test(error.message);
+}
+async function runSynchronization(){
+ if(!navigator.onLine)throw new Error("Sin conexión. Los pendientes siguen guardados en este dispositivo.");
+ const token=localStorage.getItem("control_explosivos_token")||"";
+ if(!token)throw new Error("Inicia sesión nuevamente para sincronizar. Los pendientes se conservan.");
+ const operations=await getOperations(),issues:SyncIssue[]=[],blocked=new Set<string>();
+ if(operations.length){
+  const status=await request("status",{},token),version=Number(status.apiVersion||0);
+  if(status.authenticated!==true)throw new Error("La sesión del servidor venció. Cierra sesión y vuelve a ingresar con internet para sincronizar. Los pendientes se conservan.");
+  if(version<3)throw new Error("Actualiza el servidor de Explosivos antes de sincronizar. Los pendientes se conservan.");
+  for(const operation of operations){
+   const keys=operationKeys(operation);
+   let message=keys.some(key=>blocked.has(key))?"Espera la confirmación de un cambio anterior de este registro.":compatibilityError(operation,version);
+   if(!message){
+    try{
+     // One stable operation ID per request: an invalid record cannot block unrelated records.
+     const result=await request("sync",{operations:[{id:operation.id,action:operation.action,data:operation.data}]},token);
+     validateInventory(result.records);
+     if(!Array.isArray(result.processed)||result.processed.length!==1||result.processed[0]!==operation.id)throw new Error("El servidor no confirmó el pendiente enviado. Se conserva para reintentar.");
+     await acceptSnapshot(result.records,[operation.id]);
+     window.dispatchEvent(new Event("explosivos-sync-progress"));
+    }catch(error){if(!independentRejection(error))throw error;message=(error as Error).message;}
+   }
+   if(message){keys.forEach(key=>blocked.add(key));issues.push({id:operation.id,label:operationLabel(operation),message});}
+  }
+ }
+ const result=await request("list",{},token);
+ const snapshot=await acceptSnapshot(result.records);
+ return {...snapshot,issues};
+}
+let syncing:ReturnType<typeof runSynchronization>|null=null;
+export function synchronize(){
+ if(!syncing){
+  const run=()=>runSynchronization();
+  const task=Promise.resolve(navigator.locks?navigator.locks.request("explosivos-synchronize",run):run());
+  syncing=task.finally(()=>{syncing=null;});
+ }
+ return syncing!;
+}
+// Reading local inventory never pretends to be a successful server synchronization.
+export const listRecords=()=>getCachedRecords();
+
+export async function saveRecord(record:Record<string,unknown>){const id=crypto.randomUUID();const type=String(record.tipo);const user=JSON.parse(localStorage.getItem("control_explosivos_user")||"{}");const item={...record,...(type==="SELLOS"?{registradoPor:{usuario:user.usuario||"",nombre:user.nombre||user.usuario||""}}:{}),id,fechaRegistro:new Date().toISOString(),...((type==="INDUGEL"||type==="ANFO")?{verificado:true,fechaVerificacion:new Date().toISOString()}:{}),movimientos:[]};await enqueue("create",{record:item},records=>{if((type==="INDUGEL"||type==="ANFO")&&records[type].some(value=>String(value.serial)===String(record.serial)))throw new Error("Ese serial ya está registrado en este dispositivo.");records[type].unshift(item);});return {ok:true,id,local:true};}
+export async function saveBatchRecords(batch:Record<string,any>){const type=String(batch.tipo);const loteIngreso=crypto.randomUUID();const items:Array<Record<string,unknown>>=[];const generated=new Set<number>();for(const range of batch.rangos||[]){const from=Number(range.desde),to=Number(range.hasta);if(!Number.isFinite(from)||!Number.isFinite(to)||to<from)throw new Error("El rango de seriales no es válido.");for(let serial=from;serial<=to;serial++){if(generated.has(serial))throw new Error(`El serial ${serial} está repetido entre los grupos.`);generated.add(serial);items.push({id:crypto.randomUUID(),serial,tipo:type,fechaFabricacion:batch.fechaFabricacion,fechaVencimiento:batch.fechaVencimiento,fechaIngreso:batch.fechaIngreso,ubicacion:batch.ubicacion,fechaRegistro:new Date().toISOString(),verificado:false,movimientos:[],loteIngreso});}}await enqueue("createBatch",{batch:{...batch,items,loteIngreso}},records=>{const existing=new Set(records[type].map(value=>Number(value.serial)));const duplicate=items.find(item=>existing.has(Number(item.serial)));if(duplicate)throw new Error(`El serial ${duplicate.serial} ya está registrado en este dispositivo.`);records[type].unshift(...items);});return {ok:true,cantidad:items.length,loteIngreso,local:true};}
+export async function verifyBatchRecords(tipo:string,unidades:Array<Record<string,unknown>>){const ids=new Set(unidades.map(unit=>String(unit.id)));await enqueue("verifyBatch",{tipo,unidades},records=>records[tipo].forEach(item=>{if(ids.has(String(item.id))){const unit=unidades.find(value=>String(value.id)===String(item.id))!;item.fechaFabricacion=unit.fechaFabricacion;item.fechaVencimiento=unit.fechaVencimiento;item.verificado=true;item.fechaVerificacion=new Date().toISOString();}}));return {ok:true,cantidad:unidades.length,local:true};}
+export async function moveRecord(tipo:string,id:string,ubicacion:string,fechaMovimiento:string){if(!Number.isFinite(Date.parse(fechaMovimiento)))throw new Error("La fecha y hora del movimiento no son válidas.");await enqueue("move",{tipo,id,ubicacion,fechaMovimiento},records=>{const item=records[tipo].find(value=>String(value.id)===id);if(!item)throw new Error("Registro no encontrado.");const origen=item.ubicacion;item.ubicacion=ubicacion;const movements=(item.movimientos as Array<Record<string,unknown>>)||[];movements.unshift({fecha:fechaMovimiento,origen,destino:ubicacion});item.movimientos=movements;});return {ok:true,local:true};}
+export async function deleteRecord(tipo:string,id:string){await enqueue("deleteRecord",{tipo,id},records=>{const index=records[tipo].findIndex(value=>String(value.id)===id);if(index<0)throw new Error("Registro no encontrado.");records[tipo].splice(index,1);});return {ok:true,local:true};}
 export const pendingOperations=async()=> (await getOperations()).length;
 export async function listUsers(){return (await request("usersList")).users;}export async function createUser(usuario:string,nombre:string,password:string,rol:string){return request("userCreate",{usuario,nombre,password,rol});}export async function resetUserPassword(usuario:string,password:string){return request("userResetPassword",{usuario,password});}export async function setUserActive(usuario:string,activo:boolean){return request("userSetActive",{usuario,activo});}
 

@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
+import { getLocal } from "@/lib/offline-store";
 import { useRevista } from "@/lib/use-revista";
 import { RecordDialog } from "@/components/record-dialog";
 import { AccessDialog } from "@/components/access-dialog";
@@ -86,15 +87,32 @@ export default function Home() {
   const [materialLocations,setMaterialLocations]=useState<Record<string,"interior"|"surface"|"all">>({});
   const [syncState,setSyncState]=useState<"idle"|"syncing"|"success"|"error">("idle");
   const [lastSync,setLastSync]=useState("");
+  const [syncError,setSyncError]=useState("");
+  const [syncIssues,setSyncIssues]=useState<Array<{id:string;label:string;message:string}>>([]);
   const [pendingSync,setPendingSync]=useState(0);
   const [records, setRecords] = useState<Record<string, Array<Record<string, unknown>>>>({});
   const loadRecords = useCallback(async () => {
-    setSyncState("syncing");
+    setSyncState("syncing");setSyncError("");setSyncIssues([]);
+    const showSavedSync=async()=>{const stamp=await getLocal<string>("lastSync","");if(stamp)setLastSync(new Date(stamp).toLocaleString("es-CO",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}));};
     try {
-      setRecords(await listRecords());setPendingSync(await pendingOperations());
-      const now=new Date();if(navigator.onLine)setLastSync(now.toLocaleString("es-CO",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}));setSyncState(navigator.onLine?"success":"idle");return true;
-    } catch {setPendingSync(await pendingOperations());setSyncState("error");return false;}
+      setRecords(await listRecords());setPendingSync(await pendingOperations());await showSavedSync();
+      if(!navigator.onLine){setSyncState("idle");setSyncError("Sin conexión. Los pendientes siguen guardados en este dispositivo.");return false;}
+      const result=await synchronize();
+      setRecords(result.records);setPendingSync(result.pending);setSyncIssues(result.issues);await showSavedSync();
+      setSyncState(result.pending?"error":"success");
+      if(result.pending)setSyncError(`${result.pending} operación(es) pendiente(s). ${result.issues.length?"Revisa los motivos indicados abajo.":"Hay cambios nuevos por enviar; pulsa SINCRONIZAR otra vez."}`);
+      return result.pending===0;
+    } catch(cause) {
+      setSyncError(cause instanceof Error?cause.message:"No se pudo sincronizar. Los pendientes se conservan.");setSyncState("error");
+      try{setRecords(await listRecords());setPendingSync(await pendingOperations());await showSavedSync();}catch{}
+      return false;
+    }
   }, []);
+  useEffect(()=>{
+    const progress=()=>{void pendingOperations().then(setPendingSync);};
+    window.addEventListener("explosivos-sync-progress",progress);
+    return()=>window.removeEventListener("explosivos-sync-progress",progress);
+  },[]);
   useEffect(() => {
     if (!backendConfigured()) { setChecking(false); return; }
     getStatus().then((status) => {
@@ -146,7 +164,7 @@ export default function Home() {
   async function removeRecord(record:Record<string,unknown>){
     const identifier=String(record.serial||record.cajaNumero||record.id);
     if(!window.confirm(`¿Eliminar definitivamente el registro ${identifier} de ${selected}?\n\nEsta acción se registrará a tu nombre.`))return;
-    try{await deleteRecord(selected,String(record.id));setRecords(await listRecords());await synchronize();setPendingSync(await pendingOperations());}
+    try{await deleteRecord(selected,String(record.id));await loadRecords();}
     catch(cause){window.alert(cause instanceof Error?cause.message:"No se pudo eliminar el registro.");await loadRecords();}
   }
 
@@ -170,6 +188,10 @@ export default function Home() {
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-7 sm:px-8 sm:py-10">
+        {syncError&&<section role="alert" className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
+          <p className="font-semibold">{syncError}</p>
+          {syncIssues.length>0&&<details className="mt-2"><summary className="cursor-pointer font-medium">Ver pendientes y motivos ({syncIssues.length})</summary><ul className="mt-2 space-y-2">{syncIssues.map(issue=><li key={issue.id}><strong>{issue.label}:</strong> {issue.message}</li>)}</ul></details>}
+        </section>}
         <section className="mb-7" aria-label="Control de precintos">
           <button type="button" onClick={()=>setSelected("SELLOS")} className="mb-3 flex items-center gap-3 text-left"><span className="grid h-11 w-11 place-items-center rounded-xl bg-[#f5b51b] text-[#0d2c3e]"><ShieldCheck className="h-6 w-6"/></span><span><strong className="block">CONTROL DE PRECINTOS</strong><span className="text-sm text-slate-600">{records.SELLOS?.length || 0} registros de seguridad</span></span></button>
           <div className="grid gap-4 sm:grid-cols-2">
