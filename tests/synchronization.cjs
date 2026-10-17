@@ -503,6 +503,30 @@ test('fallo de guardado central no confirma una recuperación ni altera el archi
  await assert.rejects(h.backend.synchronize(),/Drive no disponible/);assert.equal(h.db.records.ANFO.length,0);assert(!h.db.deletedRecords[0].restaurado);assert.equal((await h.store.getOperations()).length,1);
 });
 
+test('diagnóstico distingue respuesta sin inventario, categoría ausente y formato inválido',async()=>{
+ const h=harness(8);
+ assert.throws(()=>h.state.validateInventory(undefined),/Falta la sección.*records/);
+ const missing=blank();delete missing.DETONADORES;
+ assert.throws(()=>h.state.validateInventory(missing),/DETONADORES: categoría ausente/);
+ const invalid=blank();invalid.INDUGEL={};
+ assert.throws(()=>h.state.validateInventory(invalid),/INDUGEL: la categoría no contiene una lista válida/);
+});
+test('diagnóstico identifica fila y serial sin ID, sin modificar ni omitir el registro',async()=>{
+ const h=harness(8),remote=blank();remote.ANFO=[{...record(555)}];
+ const original=JSON.stringify(remote);
+ assert.throws(()=>h.state.validateInventory(remote),/ANFO: fila 1 \(serial 555\) sin identificador interno \(ID\)/);
+ assert.equal(JSON.stringify(remote),original);
+ remote.SELLOS=[null];assert.throws(()=>h.state.validateInventory(remote),/SELLOS: fila 1 vacía/);
+});
+test('rechazo por ID faltante conserva inventario local y operación aun si llegaron recibos',async()=>{
+ const h=harness(8);await h.backend.saveRecord(record(555));
+ const before=JSON.stringify(await h.store.getCachedRecords()),id=(await h.store.getOperations())[0].id;
+ const broken=blank();broken.ANFO=[record(777)];
+ h.setIntercept((body,reply)=>body.action==='sync'?{ok:true,syncProtocol:'explosivos-receipts-v1',processed:[id],rejected:[],records:broken}:reply(body));
+ await assert.rejects(h.backend.synchronize(),/serial 777/);
+ assert.equal(JSON.stringify(await h.store.getCachedRecords()),before);assert.equal((await h.store.getOperations())[0].id,id);
+});
+
 (async () => {
   for (const { name, run } of tests) { await run(); console.log('PASS:', name); }
   console.log(`${tests.length} pruebas de sincronización superadas; sin acceso a datos reales.`);
