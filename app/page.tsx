@@ -192,6 +192,16 @@ export default function Home() {
     if(format==="excel"){const XLSX=await import("xlsx");const sheet=XLSX.utils.aoa_to_sheet([[title],[detail],[],headers,...rows]);sheet["!cols"]=headers.map((h,i)=>({wch:Math.min(45,Math.max(h.length,...rows.map(row=>row[i].length))+2)}));const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,"Inventario");XLSX.writeFile(book,filename+".xlsx");}
     else {const [{jsPDF},{default:autoTable}]=await Promise.all([import("jspdf"),import("jspdf-autotable")]);const doc=new jsPDF({orientation:"landscape"});doc.setFontSize(14);doc.text(title,14,16);doc.setFontSize(9);const lines=doc.splitTextToSize(detail,268);doc.text(lines,14,23);autoTable(doc,{head:[headers],body:rows.map(row=>row.map((cell,index)=>index===9?(cell?"X":""):cell)),startY:28+lines.length*4,styles:{fontSize:7,cellPadding:2},headStyles:{fillColor:[13,44,62]},margin:{bottom:15},didDrawPage:()=>{doc.setFontSize(8);doc.text("CONTROL EXPLOSIVOS SK · Página "+doc.getNumberOfPages(),14,doc.internal.pageSize.getHeight()-7);}});doc.save(filename+".pdf");}
   }catch(cause){window.alert(cause instanceof Error?cause.message:"No se pudo exportar.");}finally{setExporting(false);}}
+  const historySection = useRef<HTMLElement>(null);
+  function openSealHistory() {
+    setSelected("SELLOS");
+    setQuery(""); setDateFilter(""); setEntryFilter("");
+    setVerificationFilter("TODOS"); setRevistaFilter("TODOS");
+    requestAnimationFrame(() => {
+      historySection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      historySection.current?.focus({ preventScroll: true });
+    });
+  }
   const latestPrecintos = { INDUGEL: records.SELLOS?.find(record => record.selloIndugel), ANFO: records.SELLOS?.find(record => record.selloAnfo) };
   async function removeRecord(record:Record<string,unknown>){
     const identifier=String(record.serial||record.cajaNumero||record.id);
@@ -226,10 +236,13 @@ export default function Home() {
           {syncIssues.length>0&&<details className="mt-2"><summary className="cursor-pointer font-medium">Ver pendientes y motivos ({syncIssues.length})</summary><ul className="mt-2 space-y-2">{syncIssues.map(issue=><li key={issue.id}><strong>{issue.label}:</strong> {issue.message}</li>)}</ul></details>}
         </section>}
         <section className="mb-7" aria-label="Control de precintos">
-          <button type="button" onClick={()=>setSelected("SELLOS")} className="mb-3 flex items-center gap-3 text-left"><span className="grid h-11 w-11 place-items-center rounded-xl bg-[#f5b51b] text-[#0d2c3e]"><ShieldCheck className="h-6 w-6"/></span><span><strong className="block">CONTROL DE PRECINTOS</strong><span className="text-sm text-slate-600">{records.SELLOS?.length || 0} registros de seguridad</span></span></button>
+          <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <button type="button" onClick={openSealHistory} className="flex items-center gap-3 text-left"><span className="grid h-11 w-11 place-items-center rounded-xl bg-[#f5b51b] text-[#0d2c3e]"><ShieldCheck className="h-6 w-6"/></span><span><strong className="block">CONTROL DE PRECINTOS</strong><span className="text-sm text-slate-600">{records.SELLOS?.length || 0} registros de seguridad</span></span></button>
+          <Button type="button" variant="outline" onClick={openSealHistory} className="min-h-11 border-[#0d2c3e]/25 font-semibold text-[#0d2c3e]">VER REGISTROS DE PRECINTOS</Button>
+          </div>
           <div className="grid gap-4 sm:grid-cols-2">
             {(["INDUGEL", "ANFO"] as const).map(material=>{const latest=latestPrecintos[material];const field=material==="INDUGEL"?"selloIndugel":"selloAnfo";return <article key={material} className="rounded-2xl border border-amber-200 bg-white p-5 shadow-sm">
-              <button type="button" onClick={()=>setSelected("SELLOS")} className="block w-full text-left"><span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">PRECINTO {material}</span><strong className="mt-2 block text-2xl tabular-nums text-[#0d2c3e]">{String(latest?.[field] ?? "—")}</strong></button>
+              <button type="button" onClick={openSealHistory} className="block w-full text-left"><span className="block text-xs font-semibold uppercase tracking-wide text-slate-500">PRECINTO {material}</span><strong className="mt-2 block text-2xl tabular-nums text-[#0d2c3e]">{String(latest?.[field] ?? "—")}</strong></button>
               {latest&&<p className="mt-2 text-sm text-slate-500">{String(latest.fecha||"")}{latest.motivo?` · ${String(latest.motivo)}`:""}</p>}
               <div className="mt-4"><RecordDialog initialType="SELLOS" sealMaterial={material} onSaved={loadRecords} triggerLabel="REGISTRAR NUEVO PRECINTO" triggerClassName="h-11 w-full bg-[#0d2c3e] px-3 text-xs font-semibold text-white hover:bg-[#16445d]" /></div>
             </article>})}
@@ -239,7 +252,7 @@ export default function Home() {
           <div>
             <p className="mb-1 text-center text-sm font-medium uppercase tracking-[0.14em] text-slate-500 sm:text-left">Inventario actual</p>
             <h1 className="text-center text-3xl font-semibold tracking-tight sm:text-left sm:text-4xl">EXPLOSIVOS Y ACCESORIOS</h1>
-            <div className="mt-5 grid gap-3 [&>button]:w-full [&>button]:justify-center sm:flex sm:flex-wrap sm:[&>button]:w-auto"><RecordDialog initialType="INDUGEL" onSaved={async result=>{await loadRecords();if(result?.loteIngreso)setVerificationSignal(value=>value+1);}} triggerLabel="REGISTRAR INGRESOS" triggerClassName="h-12 bg-[#0d2c3e] px-5 font-semibold text-white hover:bg-[#16445d]"/><MovementDialog records={records} onSaved={loadRecords}/><VerificationDialog records={records} onSaved={loadRecords} autoOpenSignal={verificationSignal}/></div>
+            <div className="mt-5 grid gap-3 [&>button]:w-full [&>button]:justify-center sm:flex sm:flex-wrap sm:[&>button]:w-auto"><RecordDialog initialType="INDUGEL" onSaved={async result=>{await loadRecords();if(result?.loteIngreso)setVerificationSignal(value=>value+1);}} triggerLabel="REGISTRAR INGRESOS" triggerClassName="h-12 bg-[#0d2c3e] px-5 font-semibold text-white hover:bg-[#16445d]"/><VerificationDialog records={records} onSaved={loadRecords} autoOpenSignal={verificationSignal}/><MovementDialog records={records} onSaved={loadRecords}/></div>
           </div>
         </section>
 
@@ -275,7 +288,7 @@ export default function Home() {
           )})}
         </section>
 
-        <section className="mt-7">
+        <section ref={historySection} tabIndex={-1} aria-label={selected==="SELLOS"?"Historial de precintos":"Registros de inventario"} className="mt-7 scroll-mt-4 focus:outline-none">
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
               <div><h2 className="text-lg font-semibold">{selected === "SELLOS" ? "REGISTROS DE NOVEDADES DE PRECINTOS" : selected}</h2><p className="text-sm text-slate-500">{selected === "SELLOS" ? "Registros disponibles" : `Registros en ${selectedLocationLabel}`}</p></div>
