@@ -37,6 +37,9 @@ function doPost(e) {
     if (action === "verifyBatch") return json_(verifyBatch_(body, user.usuario, body.operationId));
     if (action === "move") return json_(move_(body, user.usuario, body.operationId));
     if (action === "deleteRecord") return json_(deleteRecord_(body, user, body.operationId));
+    if (action === "deletedRecordsList") return json_(deletedRecordsList_(user));
+    if (action === "restoreRecord") return json_(restoreRecord_(body,user,body.operationId));
+    if (action === "revertMovement") return json_(revertMovement_(body,user,body.operationId));
     if (action === "usersList") return json_(usersList_(user));
     if (action === "userCreate") return json_(userCreate_(body, user));
     if (action === "userResetPassword") return json_(userResetPassword_(body, user));
@@ -73,7 +76,7 @@ function save_(db) {
 function status_(token) {
   const db = load_(); let current = null;
   try { current = sessionFromDb_(db, token); } catch (_) {}
-  return { ok: true, apiVersion: 7, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
+  return { ok: true, apiVersion: 8, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
 }
 
 // One durable commit per batch, with a receipt for every operation (SK/Plaza model).
@@ -99,6 +102,8 @@ function sync_(operations,user,protocol) {
         else if(action==="createBatch")createBatch_(data.batch||{},user.usuario,id,draft);
         else if(action==="verifyBatch")verifyBatch_(data,user.usuario,id,draft);
         else if(action==="move")move_(data,user.usuario,id,draft);
+        else if(action==="restoreRecord")restoreRecord_(data,user,id,draft);
+        else if(action==="revertMovement")revertMovement_(data,user,id,draft);
         else if(action==="deleteRecord")deleteRecord_(data,user,id,draft);
         else throw new Error("Operación pendiente no reconocida: "+action);
         Object.keys(draft).forEach(function(key){db[key]=draft[key];});processed.push(id);
@@ -107,7 +112,7 @@ function sync_(operations,user,protocol) {
         keys.forEach(function(key){blocked.add(key);});
       }
     });
-    return {ok:true,apiVersion:7,syncProtocol:"explosivos-receipts-v1",processed:processed,rejected:rejected,records:publicRecords_(db)};
+    return {ok:true,apiVersion:8,syncProtocol:"explosivos-receipts-v1",processed:processed,rejected:rejected,records:publicRecords_(db)};
   });
 }
 function legacySync_(operations,user) {
@@ -123,6 +128,8 @@ function legacySync_(operations,user) {
     else if(action==="createBatch")createBatch_(data.batch||{},user.usuario,id);
     else if(action==="verifyBatch")verifyBatch_(data,user.usuario,id);
     else if(action==="move")move_(data,user.usuario,id);
+    else if(action==="restoreRecord")restoreRecord_(data,user,id);
+    else if(action==="revertMovement")revertMovement_(data,user,id);
     else if(action==="deleteRecord")deleteRecord_(data,user,id);
     else throw new Error("Operación pendiente no reconocida: "+action);
     processed.push(id);
@@ -246,20 +253,54 @@ function move_(body,usuario,operationId,batchDb) {
   });
 }
 
+// Deletion is disabled on the server too, including requests from older clients.
 function deleteRecord_(body,user,operationId,batchDb) {
   requireAdmin_(user);
-  return mutate_(batchDb,function(db) {
+  throw new Error("La eliminación de seriales está deshabilitada. Usa Revertir / recuperar.");
+}
+
+function deletedRecordsList_(user) {
+  requireAdmin_(user);
+  return {ok:true,deletedRecords:(load_().deletedRecords||[]).filter(function(row){return !row.restaurado;})};
+}
+function correctionItem_(db,body) {
+  const tipo=required_(body.tipo,"tipo"),id=required_(body.id,"registro");
+  if(tipo==="SELLOS"||!Object.prototype.hasOwnProperty.call(db.records,tipo))throw new Error("Tipo de material no válido.");
+  return {tipo:tipo,id:id,motivo:required_(body.reason,"motivo de la corrección")};
+}
+function restoreRecord_(body,user,operationId,batchDb) {
+  requireAdmin_(user);
+  return mutate_(batchDb,function(db){
     if(operationDone_(db,operationId))return {ok:true,repeated:true};
-    const tipo=required_(body.tipo,"tipo");if(tipo==="SELLOS"||!db.records[tipo])throw new Error("Tipo de material no válido para eliminación.");
-    const id=required_(body.id,"registro");const index=db.records[tipo].findIndex(function(item){return String(item.id)===id;});
-    if(index<0){
-      if((db.deletedRecords||[]).some(function(row){return row.tipo===tipo&&String(row.registro&&row.registro.id)===id;})){markOperation_(db,operationId);return {ok:true,id:id,alreadyDeleted:true};}
-      throw new Error("El registro que intentas eliminar ya no existe.");
-    }
-    const removed=db.records[tipo].splice(index,1)[0];
-    db.deletedRecords=db.deletedRecords||[];db.externalPeople=db.externalPeople||[];db.deletedRecords.unshift({tipo:tipo,registro:removed,eliminadoPor:user.usuario,fechaEliminacion:iso_()});
-    if(db.deletedRecords.length>5000)db.deletedRecords=db.deletedRecords.slice(0,5000);
-    markOperation_(db,operationId);return {ok:true,id:id};
+    const target=correctionItem_(db,body),deletedAt=required_(body.deletedAt,"fecha de eliminación");
+    const archived=(db.deletedRecords||[]).find(function(row){return row.tipo===target.tipo&&String(row.registro&&row.registro.id)===target.id&&row.fechaEliminacion===deletedAt;});
+    if(!archived)throw new Error("No se encontró una copia archivada de este registro.");
+    if(archived.restaurado)throw new Error("Este registro ya fue recuperado. Actualiza la consulta.");
+    const rows=db.records[target.tipo],item=JSON.parse(JSON.stringify(archived.registro));
+    if(rows.some(function(row){return String(row.id)===target.id;}))throw new Error("El registro ya existe en el inventario.");
+    const key=target.tipo==="ANFO"||target.tipo==="INDUGEL"?"serial":"cajaNumero";
+    required_(item[key],"serial o caja archivado");unique_(rows,key,item[key]);
+    const audit={fecha:iso_(),usuario:user.usuario,motivo:target.motivo,operationId:operationId||""};
+    item.restauraciones=item.restauraciones||[];item.restauraciones.push(audit);
+    rows.unshift(item);archived.restaurado=audit;
+    markOperation_(db,operationId);return {ok:true,id:target.id};
+  });
+}
+function revertMovement_(body,user,operationId,batchDb) {
+  requireAdmin_(user);
+  return mutate_(batchDb,function(db){
+    if(operationDone_(db,operationId))return {ok:true,repeated:true};
+    const target=correctionItem_(db,body),expected=body.movement||{};
+    const item=db.records[target.tipo].find(function(row){return String(row.id)===target.id;});
+    if(!item)throw new Error("Registro no encontrado.");
+    const history=Array.isArray(item.movimientos)?item.movimientos:[];
+    const index=history.findIndex(function(row){return row&&row.revertido!==true;});
+    const movement=history[index];
+    if(!movement||index!==expected.index||history.length!==expected.historyLength||movement.fecha!==expected.fecha||movement.origen!==expected.origen||movement.destino!==expected.destino||item.ubicacion!==movement.destino)throw new Error("El traslado cambió o ya fue revertido. Sincroniza y selecciona de nuevo.");
+    if(APP.locations.indexOf(movement.origen)<0||APP.locations.indexOf(movement.destino)<0||movement.origen===movement.destino)throw new Error("El traslado no tiene un origen y un destino válidos para revertir.");
+    movement.revertido=true;movement.reversion={fecha:iso_(),usuario:user.usuario,motivo:target.motivo,operationId:operationId||""};
+    item.ubicacion=movement.origen;
+    markOperation_(db,operationId);return {ok:true,id:target.id};
   });
 }
 
@@ -304,4 +345,5 @@ function externalUpsert_(p,usuario,operationId,batchDb){
  if(internal.some(function(row){return row.documento===person.documento;}))throw new Error("El documento ya pertenece a Personal de SK Admin.");
  return mutate_(batchDb,function(db){if(operationDone_(db,operationId))return {ok:true,repeated:true};db.externalPeople=db.externalPeople||[];const existing=db.externalPeople.find(function(row){return row.documento===person.documento;});const now=iso_();if(existing)Object.assign(existing,person,{updatedAt:now,updatedBy:usuario});else db.externalPeople.push(Object.assign({},person,{createdAt:now,createdBy:usuario}));markOperation_(db,operationId);return {ok:true,person:person};});
 }
+
 

@@ -19,7 +19,7 @@ function validDate(value: unknown) {
 
 export function transferDate(record: Record<string, unknown>) {
   const movements = Array.isArray(record.movimientos) ? record.movimientos as Array<Record<string, unknown>> : [];
-  return movements.filter(m => m.destino === "Polvorín interior de mina")
+  return movements.filter(m => m.revertido !== true && m.destino === "Polvorín interior de mina")
     .map(m => validDate(m.fecha)).filter(Boolean).sort().at(-1) || "";
 }
 

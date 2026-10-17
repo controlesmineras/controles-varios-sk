@@ -11,7 +11,7 @@ const blank = () => ({ INDUGEL: [], ANFO: [], 'MECHA DE SEGURIDAD': [], DETONADO
 const record = serial => ({ tipo: 'ANFO', serial, fechaFabricacion: '2026-01-01', fechaVencimiento: '2027-01-01', fechaIngreso: '2026-10-17', ubicacion: 'Polvorín superficie' });
 const deferred = () => { let resolve; const promise = new Promise(r => resolve = r); return { promise, resolve }; };
 function harness(version = 7, role = "ADMINISTRADOR") {
-  const local = new Map([['control_explosivos_token', 'token'], ['control_explosivos_user', JSON.stringify({ usuario: 'audit', nombre: 'Audit', rol: 'ADMINISTRADOR' })]]);
+  const local = new Map([['control_explosivos_token', 'token'], ['control_explosivos_user', JSON.stringify({ usuario: 'audit', nombre: 'Audit', rol: role })]]);
   const server = { Utilities: { getUuid: () => crypto.randomUUID() } };
   vm.createContext(server);
   vm.runInContext(fs.readFileSync(path.join(root, 'apps-script/Code.gs'), 'utf8'), server);
@@ -21,7 +21,8 @@ function harness(version = 7, role = "ADMINISTRADOR") {
   const calls = [], events = [];
   let intercept = null;
   const defaultReply = body => {
-    if (body.action === 'status') return { ok: true, apiVersion: version, authenticated: true, usuario: { usuario: 'audit' } };
+    if (body.action === 'status') return { ok: true, apiVersion: version, authenticated: true, usuario: { usuario: 'audit', rol: role } };
+    if (body.action === 'deletedRecordsList') { try { return server.deletedRecordsList_({usuario:'audit',rol:role}); } catch (error) { return {ok:false,error:error.message}; } }
     if (body.action === 'list') return { ok: true, records: clone(db.records) };
     if (body.action === 'sync') {
       try {
@@ -65,7 +66,7 @@ function harness(version = 7, role = "ADMINISTRADOR") {
     fn(module, module.exports, name => load(name.startsWith('@/') ? name.slice(2) + '.ts' : path.resolve(path.dirname(filename), name + '.ts')));
     return module.exports;
   }
-  return { backend: load('lib/backend.ts'), store: load('lib/offline-store.ts'), state: load('lib/sync-state.ts'), context, local, calls, events,
+  return { backend: load('lib/backend.ts'), store: load('lib/offline-store.ts'), state: load('lib/sync-state.ts'), corrections: load('lib/inventory-corrections.ts'), order: load('lib/inventory-order.ts'), context, local, calls, events,
     get db() { return db; }, get writes(){return writes;}, failWrite:()=>{failWrite=true;}, server, setIntercept: value => { intercept = value; } };
 }
 const tests = [];
@@ -390,6 +391,116 @@ test('actualizaciones locales concurrentes conservan marcas ajenas y abortan com
  const marks=await h.store.getLocal('revista-test',{});assert.equal(marks.old,'old');assert.equal(marks.a,'a');assert.equal(marks.b,'b');
  await assert.rejects(h.store.updateLocal('revista-test',{},value=>{delete value.old;throw new Error('fallo');}),/fallo/);
  assert.equal((await h.store.getLocal('revista-test',{})).old,'old');
+});
+
+function archivedFixture(h, serial=555) {
+ const item={...record(serial),id:'recover-'+serial,verificado:true,fechaRegistro:'2026-10-16T10:00:00.000Z',movimientos:[]};
+ const entry={tipo:'ANFO',registro:item,eliminadoPor:'audit',fechaEliminacion:'2026-10-17T12:00:00.000Z'};
+ h.db.deletedRecords.push(entry);return entry;
+}
+function movedFixture(h) {
+ const item={...record(777),id:'moved',verificado:true,ubicacion:'Polvorín interior de mina',movimientos:[{fecha:'2026-10-17T12:00:00.000Z',origen:'Polvorín superficie',destino:'Polvorín interior de mina',usuario:'original'}]};
+ h.db.records.ANFO.push(item);return item;
+}
+test('API 8 recupera el mismo ID, serial y datos; conserva copia y auditoría',async()=>{
+ const h=harness(8),entry=archivedFixture(h);
+ assert.equal((await h.backend.getCorrectionData()).archived.length,1);
+ await h.backend.restoreDeletedRecord(entry,'Eliminación por confusión');
+ assert.equal((await h.store.getCachedRecords()).ANFO.length,0,'No fingir recuperación antes de confirmar');
+ const result=await h.backend.synchronize();assert.equal(result.pending,0);
+ const restored=h.db.records.ANFO[0];
+ for(const key of Object.keys(entry.registro))assert.equal(JSON.stringify(restored[key]),JSON.stringify(entry.registro[key]));
+ assert.equal(restored.restauraciones[0].motivo,'Eliminación por confusión');
+ assert.equal(h.db.deletedRecords.length,1);assert(h.db.deletedRecords[0].restaurado);
+ assert.equal((await h.backend.getCorrectionData()).archived.length,0);
+});
+test('respuesta perdida al recuperar no duplica serial ni auditoría',async()=>{
+ const h=harness(8),entry=archivedFixture(h);await h.backend.restoreDeletedRecord(entry,'Error');
+ const original=(await h.store.getOperations())[0].id;
+ h.setIntercept((body,reply)=>{const result=reply(body);if(body.action==='sync')throw new Error('lost');return result;});
+ await assert.rejects(h.backend.synchronize(),/No se pudo conectar/);
+ assert.equal(h.db.records.ANFO.length,1);assert.equal((await h.store.getOperations())[0].id,original);
+ h.setIntercept(null);assert.equal((await h.backend.synchronize()).pending,0);
+ assert.equal(h.db.records.ANFO.length,1);assert.equal(h.db.records.ANFO[0].restauraciones.length,1);
+});
+test('recuperación rechaza serial duplicado sin reemplazar ni perder registros',async()=>{
+ const h=harness(8),entry=archivedFixture(h);h.db.records.ANFO.push({...record(555),id:'different-id'});
+ await h.backend.restoreDeletedRecord(entry,'Error');const result=await h.backend.synchronize();
+ assert.equal(result.pending,0);assert.match(result.issues[0].message,/Ya existe/);
+ assert.equal((await h.backend.getCorrectionData()).rejected.length,1);
+ assert.equal(h.db.records.ANFO[0].id,'different-id');assert.equal(h.db.records.ANFO.length,1);assert(!h.db.deletedRecords[0].restaurado);
+});
+test('revertir mantiene serial, cantidad e historial y quita fecha de traslado vigente',async()=>{
+ const h=harness(8),item=movedFixture(h),expected=h.corrections.latestReversibleMovement(item);
+ await h.backend.synchronize();await h.backend.revertLastMovement('ANFO',item.id,expected,'Traslado registrado por error');
+ assert.equal((await h.store.getCachedRecords()).ANFO[0].ubicacion,'Polvorín interior de mina');
+ const result=await h.backend.synchronize();assert.equal(result.pending,0);
+ const changed=h.db.records.ANFO[0];assert.equal(changed.id,item.id);assert.equal(changed.serial,777);assert.equal(h.db.records.ANFO.length,1);
+ assert.equal(changed.ubicacion,'Polvorín superficie');assert.equal(changed.movimientos.length,1);assert.equal(changed.movimientos[0].usuario,'original');
+ assert.equal(changed.movimientos[0].reversion.usuario,'audit');assert.equal(changed.movimientos[0].reversion.motivo,'Traslado registrado por error');
+ assert.equal(h.order.transferDate(changed),'');assert.equal(h.corrections.latestReversibleMovement(changed),null);
+});
+test('reversión con respuesta perdida se aplica una sola vez',async()=>{
+ const h=harness(8),item=movedFixture(h);await h.backend.revertLastMovement('ANFO',item.id,h.corrections.latestReversibleMovement(item),'Error');
+ h.setIntercept((body,reply)=>{const result=reply(body);if(body.action==='sync')throw new Error('lost');return result;});
+ await assert.rejects(h.backend.synchronize(),/No se pudo conectar/);
+ const audit=JSON.stringify(h.db.records.ANFO[0].movimientos[0].reversion);
+ h.setIntercept(null);assert.equal((await h.backend.synchronize()).pending,0);
+ assert.equal(JSON.stringify(h.db.records.ANFO[0].movimientos[0].reversion),audit);
+});
+test('traslado nuevo impide revertir una selección desactualizada',async()=>{
+ const h=harness(8),item=movedFixture(h);await h.backend.revertLastMovement('ANFO',item.id,h.corrections.latestReversibleMovement(item),'Error');
+ h.server.move_({tipo:'ANFO',id:item.id,ubicacion:'Polvorín superficie',fechaMovimiento:'2026-10-17T13:00:00.000Z'},'other','new-move');
+ const result=await h.backend.synchronize();assert.equal(result.pending,0);assert.match(result.issues[0].message,/cambió o ya fue revertido/);
+ const audit=await h.store.getLocal('rejectedCorrections',[]);assert.equal(audit.length,1);assert.equal(audit[0].data.reason,'Error');
+ await h.backend.synchronize();assert.equal(h.db.records.ANFO[0].ubicacion,'Polvorín superficie');
+ assert.equal(h.db.records.ANFO[0].movimientos.length,2);assert(!h.db.records.ANFO[0].movimientos[1].revertido);
+ assert.equal(h.db.records.ANFO[0].serial,777);
+});
+test('API anterior no recibe correcciones; operadores tampoco pueden ejecutarlas',async()=>{
+ const old=harness(7),entry=archivedFixture(old);
+ assert.equal((await old.backend.getCorrectionData()).needsServerUpdate,true);
+ await assert.rejects(old.backend.restoreDeletedRecord(entry,'Error'),/Actualiza Code.gs/);
+ assert.equal((await old.store.getOperations()).length,0);
+ await old.store.enqueueCorrection('restoreRecord',{tipo:'ANFO',id:entry.registro.id,deletedAt:entry.fechaEliminacion,reason:'Error'});
+ const blocked=await old.backend.synchronize();assert.equal(blocked.pending,1);assert.equal(old.calls.filter(x=>x.action==='sync').length,0);
+ const operator=harness(8,'OPERADOR'),deleted=archivedFixture(operator);
+ await assert.rejects(operator.backend.restoreDeletedRecord(deleted,'Error'),/administrador/);
+ assert.throws(()=>operator.server.restoreRecord_({tipo:'ANFO',id:deleted.registro.id,deletedAt:deleted.fechaEliminacion,reason:'Error'},{usuario:'op',rol:'OPERADOR'},'bad'),/administrador/);
+ assert.throws(()=>operator.server.revertMovement_({},{usuario:'op',rol:'OPERADOR'},'bad'),/administrador/);
+ assert.throws(()=>operator.server.deletedRecordsList_({rol:'OPERADOR'}),/administrador/);
+ assert.equal(operator.db.records.ANFO.length,0);
+});
+test('clientes antiguos no pueden eliminar seriales en servidor API 8',async()=>{
+ const h=harness(8);h.db.records.ANFO.push({...record(555),id:'keep'});
+ assert.throws(()=>h.server.deleteRecord_({tipo:'ANFO',id:'keep'},{usuario:'audit',rol:'ADMINISTRADOR'},'del'),/deshabilitada/);
+ const result=h.server.sync_([{id:'del',action:'deleteRecord',data:{tipo:'ANFO',id:'keep'}}],{usuario:'audit',rol:'ADMINISTRADOR'},'explosivos-receipts-v1');
+ assert.equal(result.rejected.length,1);assert.equal(h.db.records.ANFO.length,1);assert.equal(h.db.deletedRecords.length,0);
+});
+test('cancelar eliminaciones retiene auditoría, serial y todos los pendientes ajenos',async()=>{
+ const h=harness(7);h.db.records.ANFO.push({...record(555),id:'keep'});
+ await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'keep'});await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'keep'});
+ await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'other'});
+ await h.backend.saveRecord(record(556));
+ const result=await h.backend.cancelDeletionRequest('ANFO','keep');assert.equal(result.cancelled,2);assert.equal(result.present,true);
+ assert.equal((await h.store.getOperations()).length,2);assert.equal((await h.store.getCachedRecords()).ANFO.length,2);
+ const audit=await h.store.getLocal('cancelledOperations',[]);assert.equal(audit.length,2);assert.equal(audit[0].cancelledBy,'audit');
+ assert.equal(h.calls.filter(x=>x.action==='sync').length,0);
+});
+test('cancelar solicitud ya eliminada no declara recuperación y exige restauración aparte',async()=>{
+ const h=harness(8),entry=archivedFixture(h);await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:entry.registro.id});
+ await assert.rejects(h.backend.restoreDeletedRecord(entry,'Error'),/cancela primero/);
+ const result=await h.backend.cancelDeletionRequest('ANFO',entry.registro.id);assert.equal(result.present,false);
+ assert.equal(h.db.records.ANFO.length,0);await h.backend.restoreDeletedRecord(entry,'Error');await h.backend.synchronize();assert.equal(h.db.records.ANFO.length,1);
+});
+test('dos correcciones simultáneas del mismo registro generan una sola solicitud',async()=>{
+ const h=harness(8),entry=archivedFixture(h);
+ const results=await Promise.allSettled([h.backend.restoreDeletedRecord(entry,'Error'),h.backend.restoreDeletedRecord(entry,'Error')]);
+ assert.equal(results.filter(x=>x.status==='fulfilled').length,1);assert.equal((await h.store.getOperations()).length,1);
+});
+test('fallo de guardado central no confirma una recuperación ni altera el archivo',async()=>{
+ const h=harness(8),entry=archivedFixture(h);await h.backend.restoreDeletedRecord(entry,'Error');h.failWrite();
+ await assert.rejects(h.backend.synchronize(),/Drive no disponible/);assert.equal(h.db.records.ANFO.length,0);assert(!h.db.deletedRecords[0].restaurado);assert.equal((await h.store.getOperations()).length,1);
 });
 
 (async () => {

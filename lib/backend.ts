@@ -1,9 +1,10 @@
 import {createDeviceAccess} from "@/lib/device-access";
 const deviceAccess=createDeviceAccess("explosivos");
 import {sealPerson,type SealPerson} from "@/lib/seal-people";
-import {enqueue,getCachedRecords,getOperations,acceptSnapshot,getLocal,setLocal} from "@/lib/offline-store";
+import {enqueue,getCachedRecords,getOperations,acceptSnapshot,getLocal,setLocal,enqueueCorrection,cancelPendingDeletions} from "@/lib/offline-store";
 import {operationKeys,operationLabel,validateInventory} from "@/lib/sync-state";
-import type {OfflineOperation} from "@/lib/offline-store";
+import type {DeletedRecord,MovementToReverse} from "@/lib/inventory-corrections";
+import type {OfflineOperation,RejectedCorrection} from "@/lib/offline-store";
 declare global{interface Window{CONTROL_EXPLOSIVOS_CONFIG?:{apiUrl?:string};}}
 const apiUrl=()=>window.CONTROL_EXPLOSIVOS_CONFIG?.apiUrl?.trim()||"";type ApiResult=Record<string,any>;
 export function backendConfigured(){return Boolean(apiUrl());}
@@ -56,6 +57,7 @@ export function logout(){localStorage.removeItem("control_explosivos_token");loc
 export type SyncIssue={id:string;label:string;message:string};
 function compatibilityError(operation:OfflineOperation,version:number){
  if(operation.action==="deleteRecord")return "La eliminación de seriales está deshabilitada. Este pendiente se conserva para revisión.";
+ if(version<8&&["restoreRecord","revertMovement"].includes(operation.action))return "Actualiza el servidor de Explosivos para recuperar o revertir registros.";
  const record=operation.data.record as Record<string,unknown>|undefined;
  if(version<6&&(operation.action==="externalUpsert"||record?.sealSchema===2))return "Actualiza el servidor de Explosivos para sincronizar participantes y externos.";
  if(version<5&&record?.tipo==="SELLOS"&&record?.motivo)return "Actualiza el servidor de Explosivos para sincronizar precintos con su motivo.";
@@ -113,7 +115,10 @@ async function runSynchronization(){
     const receipts=[...processed,...rejections.map(issue=>issue?.id)];
     if(!Array.isArray(result.processed)||receipts.length!==expected.size||new Set(receipts).size!==expected.size||receipts.some(id=>typeof id!=="string"||!expected.has(id))||rejections.some(issue=>!issue||typeof issue.message!=="string"||!issue.message.trim()))throw new Error("El servidor no confirmó todos los pendientes enviados. Se conservan para reintentar.");
     const reconciled=rejections.filter(issue=>deletionAlreadyApplied(eligible.find(operation=>operation.id===issue.id)!,issue.message,result.records));
-    await acceptSnapshot(result.records,[...result.processed,...reconciled.map(issue=>issue.id)]);
+    // A receipt explicitly rejecting a correction confirms it did not run. Archive
+    // the failed request so a stale target cannot block the record or run later.
+    const correctionFailures=rejections.filter(issue=>eligible.some(op=>op.id===issue.id&&["restoreRecord","revertMovement"].includes(op.action)));
+    await acceptSnapshot(result.records,[...result.processed,...reconciled.map(issue=>issue.id)],correctionFailures);
     for(const issue of rejections)if(!reconciled.includes(issue))report(eligible.find(operation=>operation.id===issue.id)!,issue.message);
     latestRecords=result.records;
     window.dispatchEvent(new Event("explosivos-sync-progress"));
@@ -145,11 +150,17 @@ async function runSynchronization(){
  const snapshot=await acceptSnapshot(latestRecords!);
  return {...snapshot,issues,hasNewPending:operations.length>0};
 }
+// Serialize sync and cancellation in this tab and, where supported, across tabs.
+let syncTail:Promise<unknown>=Promise.resolve();
+function withSyncLock<T>(run:()=>Promise<T>):Promise<T>{
+ const task=syncTail.then(async()=>navigator.locks?await navigator.locks.request("explosivos-synchronize",run):await run());
+ syncTail=task.catch(()=>undefined);return task;
+}
 let syncing:ReturnType<typeof runSynchronization>|null=null;
 export function synchronize(){
  if(!syncing){
   const run=()=>runSynchronization();
-  const task=Promise.resolve(navigator.locks?navigator.locks.request("explosivos-synchronize",run):run());
+  const task=withSyncLock(run);
   syncing=task.finally(()=>{syncing=null;});
  }
  return syncing!;
@@ -174,3 +185,41 @@ export async function listSealPeople():Promise<{people:SealPerson[];warning?:str
 export async function saveExternalPerson(value:SealPerson){const person=sealPerson({...value,origen:"Externo"}),existing=await listSealPeople();if(existing.people.some(p=>p.documento===person.documento&&p.origen==="SK Admin"))throw new Error("Este documento ya pertenece a Personal de SK Admin. Selecciónalo en el buscador.");const rows=await getLocal<SealPerson[]>("sealExternalPeople",[]);await setLocal("sealExternalPeople",[...rows.filter(p=>p.documento!==person.documento),person]);await enqueue("externalUpsert",{person});return person;}
 
 
+
+async function correctionAccess(requireCurrentServer=true){
+ if(!navigator.onLine)throw new Error("Conéctate a internet para revisar y corregir el inventario.");
+ const token=localStorage.getItem("control_explosivos_token")||"";
+ const status=await request("status",{},token);
+ if(!status.authenticated)throw new Error("Inicia sesión nuevamente para corregir registros.");
+ if(status.usuario?.rol!=="ADMINISTRADOR")throw new Error("Esta operación requiere rol administrador.");
+ if(requireCurrentServer&&Number(status.apiVersion||0)<8)throw new Error("Actualiza Code.gs y la implementación del servidor para habilitar recuperación y reversión.");
+ return {token,status};
+}
+export async function getCorrectionData(){
+ const operations=await getOperations();
+ const paused=operations.filter(op=>op.action==="deleteRecord");
+ const pending=operations.filter(op=>["restoreRecord","revertMovement"].includes(op.action));
+ const {token,status}=await correctionAccess(false);
+ const needsServerUpdate=Number(status.apiVersion||0)<8;
+ const archived:DeletedRecord[]=needsServerUpdate?[]:(await request("deletedRecordsList",{},token)).deletedRecords;
+ if(!Array.isArray(archived)||archived.some(row=>!row||!row.registro?.id||!row.tipo||!row.fechaEliminacion))throw new Error("El servidor no devolvió el archivo de eliminaciones esperado.");
+ const rejected=await getLocal<RejectedCorrection[]>("rejectedCorrections",[]);
+ return {paused,pending,archived,needsServerUpdate,rejected};
+}
+export async function restoreDeletedRecord(entry:DeletedRecord,reason:string){
+ await correctionAccess();
+ if(!reason.trim())throw new Error("Escribe el motivo de la recuperación.");
+ return enqueueCorrection("restoreRecord",{tipo:entry.tipo,id:String(entry.registro.id),deletedAt:entry.fechaEliminacion,reason:reason.trim()});
+}
+export async function revertLastMovement(tipo:string,id:string,movement:MovementToReverse,reason:string){
+ await correctionAccess();
+ if(!reason.trim())throw new Error("Escribe el motivo de la reversión.");
+ return enqueueCorrection("revertMovement",{tipo,id,movement,reason:reason.trim()});
+}
+export async function cancelDeletionRequest(tipo:string,id:string){
+ return withSyncLock(async()=>{
+  const {token,status}=await correctionAccess(false);
+  const remote=(await request("list",{},token)).records;validateInventory(remote);
+  return cancelPendingDeletions(remote,tipo,id,String(status.usuario.usuario));
+ });
+}

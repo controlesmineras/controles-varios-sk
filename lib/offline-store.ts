@@ -1,5 +1,6 @@
-import { materialTypes, overlayPending, validateInventory, type Inventory } from './sync-state';
+import { materialTypes, operationKeys, overlayPending, validateInventory, type Inventory } from './sync-state';
 export type OfflineOperation = { id: string; action: string; data: Record<string, unknown>; createdAt: string };
+export type RejectedCorrection = OfflineOperation & { rejectedAt: string; message: string };
 const DB = 'control-explosivos-local', VERSION = 1, STORE = 'data';
 function open() {
   return new Promise<IDBDatabase>((resolve, reject) => {
@@ -42,10 +43,10 @@ export async function updateLocal<T>(key: string, fallback: T, mutate: (current:
   });
 }
 // Inventory and pending operations commit in one transaction, also across tabs.
-function changeState<T>(mutate: (records: Inventory, operations: OfflineOperation[]) => { records: Inventory; operations: OfflineOperation[]; result: T; syncedAt?: string }): Promise<T> {
+function changeState<T>(mutate: (records: Inventory, operations: OfflineOperation[]) => { records: Inventory; operations: OfflineOperation[]; result: T; syncedAt?: string; rejected?: RejectedCorrection[]; cancelled?: Array<OfflineOperation & { cancelledAt: string; cancelledBy: string }> }): Promise<T> {
   return open().then(db => new Promise<T>((resolve, reject) => {
     const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
-    const recordsRequest = store.get('records'), operationsRequest = store.get('operations');
+    const recordsRequest = store.get('records'), cancelledRequest = store.get('cancelledOperations'), rejectedRequest = store.get('rejectedCorrections'), operationsRequest = store.get('operations');
     let result: T, failure: unknown;
     operationsRequest.onsuccess = () => {
       try {
@@ -54,6 +55,8 @@ function changeState<T>(mutate: (records: Inventory, operations: OfflineOperatio
         const next = mutate(records, operationsRequest.result || []);
         store.put(next.records, 'records');
         store.put(next.operations, 'operations');
+        if (next.cancelled?.length) store.put([...(cancelledRequest.result || []), ...next.cancelled], 'cancelledOperations');
+        if (next.rejected?.length) store.put([...(rejectedRequest.result || []), ...next.rejected], 'rejectedCorrections');
         if (next.syncedAt) store.put(next.syncedAt, 'lastSync');
         result = next.result;
       } catch (error) { failure = error; tx.abort(); }
@@ -76,12 +79,38 @@ export function enqueue(action: string, data: Record<string, unknown>, mutate?: 
 export function removeOperation(id: string) {
   return changeState((records, operations) => ({ records, operations: operations.filter(op => op.id !== id), result: undefined }));
 }
-export function acceptSnapshot(remote: Inventory, processed: string[] = []) {
+export function acceptSnapshot(remote: Inventory, processed: string[] = [], correctionFailures: Array<{id: string; message: string}> = []) {
   validateInventory(remote);
   return changeState((_records, operations) => {
-    const acknowledged = new Set(processed), remaining = operations.filter(op => !acknowledged.has(op.id));
+    const acknowledged = new Set(processed), failed = new Map(correctionFailures.map(issue => [issue.id, issue.message]));
+    const rejected = operations.filter(op => ['restoreRecord', 'revertMovement'].includes(op.action) && failed.has(op.id))
+      .map(op => ({ ...op, rejectedAt: new Date().toISOString(), message: failed.get(op.id)! }));
+    rejected.forEach(op => acknowledged.add(op.id));
+    const remaining = operations.filter(op => !acknowledged.has(op.id));
     const records = overlayPending(remote, remaining), syncedAt = remaining.length ? undefined : new Date().toISOString();
-    return { records, operations: remaining, syncedAt, result: { records, pending: remaining.length, syncedAt } };
+    return { records, operations: remaining, syncedAt, rejected, result: { records, pending: remaining.length, syncedAt } };
+  });
+}
+
+// Corrections only change the displayed inventory after the server confirms them.
+export function enqueueCorrection(action: 'restoreRecord' | 'revertMovement', data: Record<string, unknown>) {
+  const operation = { id: crypto.randomUUID(), action, data, createdAt: new Date().toISOString() };
+  return changeState((records, operations) => {
+    const key = `${data.tipo}:${data.id}`;
+    if (operations.some(op => operationKeys(op).includes(key))) throw new Error('Este registro tiene cambios pendientes. Sincronízalos o cancela primero su solicitud de eliminación.');
+    operations.push(operation);
+    return { records, operations, result: operation };
+  });
+}
+
+export function cancelPendingDeletions(remote: Inventory, tipo: string, id: string, user: string) {
+  validateInventory(remote);
+  return changeState((_records, operations) => {
+    const matching = (op: OfflineOperation) => op.action === 'deleteRecord' && op.data.tipo === tipo && String(op.data.id) === id;
+    const cancelled = operations.filter(matching).map(op => ({ ...op, cancelledAt: new Date().toISOString(), cancelledBy: user }));
+    const remaining = operations.filter(op => !matching(op));
+    const records = overlayPending(remote, remaining);
+    return { records, operations: remaining, cancelled, result: { cancelled: cancelled.length, present: !!remote[tipo]?.some(row => String(row.id) === id) } };
   });
 }
 

@@ -48,3 +48,10 @@ node tests/offline-session.cjs
 node tests/synchronization.cjs
 node tests/revista-order.cjs
 ```
+
+
+## Revertir y recuperar inventario
+
+El botón de eliminar seriales fue retirado. Los administradores disponen de **REVERTIR / RECUPERAR** para cancelar solicitudes antiguas de eliminación, recuperar registros desde su copia archivada y revertir el último traslado conservando serial e historial. Las correcciones requieren motivo y confirmación del servidor; no se aplican de forma optimista sobre el inventario local. Las reversiones rechazadas por cambios posteriores quedan auditadas sin bloquear futuros movimientos.
+
+**Requiere actualizar el servidor existente a API 8:** ver [instrucciones de Apps Script](apps-script/README.md#correcciones-sin-retirar-seriales-api-8). Publicar el sitio por GitHub no actualiza automáticamente el proyecto de Google Apps Script.

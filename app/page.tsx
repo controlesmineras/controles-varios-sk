@@ -12,6 +12,7 @@ import { useRevista } from "@/lib/use-revista";
 import { compareInventory, inventoryDateFor, inventoryOrderLabels, inventoryOrderOptions, transferDate, type InventoryDateField, type InventoryOrder, type InventorySort } from "@/lib/inventory-order";
 import { RecordDialog } from "@/components/record-dialog";
 import { AccessDialog } from "@/components/access-dialog";
+import { CorrectionsDialog } from "@/components/corrections-dialog";
 import { MovementDialog } from "@/components/movement-dialog";
 import { VerificationDialog } from "@/components/verification-dialog";
 import { InstallAppButton } from "@/components/install-app-button";
@@ -106,12 +107,13 @@ export default function Home() {
       if(!current())return false;
       setRecords(result.records);setPendingSync(result.pending);setSyncIssues(result.issues);await showSavedSync();
       retryCount.current=0;
-      setSyncState(result.pending?"error":"success");
+      setSyncState(result.pending||result.issues.length?"error":"success");
       if(result.pending){
         setSyncError(`${result.pending} operación(es) pendiente(s). ${result.issues.length?"Revisa los motivos indicados abajo.":"Se enviarán automáticamente los cambios nuevos."}`);
         if(!result.issues.length)setRetryDelay(1000);
       }
-      return result.pending===0;
+      if(!result.pending&&result.issues.length)setSyncError("Algunas correcciones no se aplicaron. Revisa los motivos indicados abajo.");
+      return result.pending===0&&result.issues.length===0;
     } catch(cause) {
       if(!current())return false;
       setSyncError(cause instanceof Error?cause.message:"No se pudo sincronizar. Los pendientes se conservan.");setSyncState("error");
@@ -242,7 +244,7 @@ export default function Home() {
           <div>
             <p className="mb-1 text-center text-sm font-medium uppercase tracking-[0.14em] text-slate-500 sm:text-left">Inventario actual</p>
             <h1 className="text-center text-3xl font-semibold tracking-tight sm:text-left sm:text-4xl">EXPLOSIVOS Y ACCESORIOS</h1>
-            <div className="mt-5 grid gap-3 [&>button]:w-full [&>button]:justify-center sm:flex sm:flex-wrap sm:[&>button]:w-auto"><RecordDialog initialType="INDUGEL" onSaved={async result=>{await loadRecords();if(result?.loteIngreso)setVerificationSignal(value=>value+1);}} triggerLabel="REGISTRAR INGRESOS" triggerClassName="h-12 bg-[#0d2c3e] px-5 font-semibold text-white hover:bg-[#16445d]"/><VerificationDialog records={records} onSaved={loadRecords} autoOpenSignal={verificationSignal}/><MovementDialog records={records} onSaved={loadRecords}/></div>
+            <div className="mt-5 grid gap-3 [&>button]:w-full [&>button]:justify-center sm:flex sm:flex-wrap sm:[&>button]:w-auto"><RecordDialog initialType="INDUGEL" onSaved={async result=>{await loadRecords();if(result?.loteIngreso)setVerificationSignal(value=>value+1);}} triggerLabel="REGISTRAR INGRESOS" triggerClassName="h-12 bg-[#0d2c3e] px-5 font-semibold text-white hover:bg-[#16445d]"/><VerificationDialog records={records} onSaved={loadRecords} autoOpenSignal={verificationSignal}/><MovementDialog records={records} onSaved={loadRecords}/>{currentUser?.rol==="ADMINISTRADOR"&&<CorrectionsDialog records={records} onChanged={loadRecords}/>}</div>
           </div>
         </section>
 
