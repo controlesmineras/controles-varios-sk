@@ -337,6 +337,26 @@ test('servidor anterior conserva lotes de cinco y confirmaciones completas',asyn
  const result=await h.backend.synchronize();assert.equal(result.pending,0);assert.equal(h.calls.length,7);assert.equal(h.writes,27);
 });
 
+test('doble eliminación con IDs distintos confirma el estado ya eliminado',async()=>{
+ const h=harness();h.db.records.ANFO.push({...record(100),id:'delete-me'});
+ await h.store.acceptSnapshot(h.db.records);
+ await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'delete-me'});
+ await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'delete-me'});
+ const result=await h.backend.synchronize();assert.equal(result.pending,0);assert.equal(h.db.deletedRecords.length,1);assert.equal(h.db.records.ANFO.length,0);
+});
+test('servidor anterior: segunda eliminación se concilia con inventario completo',async()=>{
+ const h=harness(6);h.db.records.ANFO.push({...record(100),id:'delete-me'});await h.store.acceptSnapshot(h.db.records);
+ await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'delete-me'});await h.backend.synchronize();
+ await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'delete-me'});
+ h.setIntercept((body,reply)=>body.action==='sync'?{ok:false,error:'El registro que intentas eliminar ya no existe.'}:reply(body));
+ const result=await h.backend.synchronize();assert.equal(result.pending,0);assert.equal(h.db.deletedRecords.length,1);
+});
+test('no se retira la eliminación si el inventario todavía contiene el registro',async()=>{
+ const h=harness(6);h.db.records.ANFO.push({...record(100),id:'delete-me'});await h.store.acceptSnapshot(h.db.records);await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'delete-me'});
+ h.setIntercept((body,reply)=>body.action==='sync'?{ok:false,error:'El registro que intentas eliminar ya no existe.'}:reply(body));
+ const result=await h.backend.synchronize();assert.equal(result.pending,1);assert.equal(result.issues.length,1);
+});
+
 (async () => {
   for (const { name, run } of tests) { await run(); console.log('PASS:', name); }
   console.log(`${tests.length} pruebas de sincronización superadas; sin acceso a datos reales.`);

@@ -55,6 +55,10 @@ function compatibilityError(operation:OfflineOperation,version:number){
  if(version<4&&operation.action==="deleteRecord")return "Actualiza el servidor de Explosivos para sincronizar eliminaciones.";
  return "";
 }
+function deletionAlreadyApplied(operation:OfflineOperation,message:string,records:Parameters<typeof acceptSnapshot>[0]){
+ const type=String(operation.data.tipo),id=String(operation.data.id);
+ return operation.action==="deleteRecord"&&message==="El registro que intentas eliminar ya no existe."&&Array.isArray(records[type])&&!records[type].some(record=>String(record.id)===id);
+}
 function independentRejection(error:unknown){
  return error instanceof ApiRejection&&/ya existe|ya está registrado|ya se encuentra|no se encontró|no encontrado|ya no existe|no puede figurar dos veces|debe verificarse|campo .* obligatorio|no (?:es )?válid|no reconocido|rango|seriales|requiere rol administrador|documento ya pertenece/i.test(error.message);
 }
@@ -96,13 +100,21 @@ async function runSynchronization(){
     const processed:unknown[]=Array.isArray(result.processed)?result.processed:[];
     const receipts=[...processed,...rejections.map(issue=>issue?.id)];
     if(!Array.isArray(result.processed)||receipts.length!==expected.size||new Set(receipts).size!==expected.size||receipts.some(id=>typeof id!=="string"||!expected.has(id))||rejections.some(issue=>!issue||typeof issue.message!=="string"||!issue.message.trim()))throw new Error("El servidor no confirmó todos los pendientes enviados. Se conservan para reintentar.");
-    await acceptSnapshot(result.records,result.processed);
-    for(const issue of rejections)report(eligible.find(operation=>operation.id===issue.id)!,issue.message);
+    const reconciled=rejections.filter(issue=>deletionAlreadyApplied(eligible.find(operation=>operation.id===issue.id)!,issue.message,result.records));
+    await acceptSnapshot(result.records,[...result.processed,...reconciled.map(issue=>issue.id)]);
+    for(const issue of rejections)if(!reconciled.includes(issue))report(eligible.find(operation=>operation.id===issue.id)!,issue.message);
     latestRecords=result.records;
     window.dispatchEvent(new Event("explosivos-sync-progress"));
    }catch(error){
     if(!independentRejection(error))throw error;
-    if(eligible.length===1){report(eligible[0],(error as Error).message);return;}
+    if(eligible.length===1){
+     const operation=eligible[0],message=(error as Error).message;
+     if(operation.action==="deleteRecord"&&message==="El registro que intentas eliminar ya no existe."){
+      const remote=(await request("list",{},token)).records;validateInventory(remote);
+      if(deletionAlreadyApplied(operation,message,remote)){await acceptSnapshot(remote,[operation.id]);latestRecords=remote;window.dispatchEvent(new Event("explosivos-sync-progress"));return;}
+     }
+     report(operation,message);return;
+    }
     // A rejected batch may already have committed a prefix. Stable IDs make these retries safe.
     for(const operation of eligible)await sendGroup([operation]);
    }

@@ -252,7 +252,10 @@ function deleteRecord_(body,user,operationId,batchDb) {
     if(operationDone_(db,operationId))return {ok:true,repeated:true};
     const tipo=required_(body.tipo,"tipo");if(tipo==="SELLOS"||!db.records[tipo])throw new Error("Tipo de material no válido para eliminación.");
     const id=required_(body.id,"registro");const index=db.records[tipo].findIndex(function(item){return String(item.id)===id;});
-    if(index<0)throw new Error("El registro que intentas eliminar ya no existe.");
+    if(index<0){
+      if((db.deletedRecords||[]).some(function(row){return row.tipo===tipo&&String(row.registro&&row.registro.id)===id;})){markOperation_(db,operationId);return {ok:true,id:id,alreadyDeleted:true};}
+      throw new Error("El registro que intentas eliminar ya no existe.");
+    }
     const removed=db.records[tipo].splice(index,1)[0];
     db.deletedRecords=db.deletedRecords||[];db.externalPeople=db.externalPeople||[];db.deletedRecords.unshift({tipo:tipo,registro:removed,eliminadoPor:user.usuario,fechaEliminacion:iso_()});
     if(db.deletedRecords.length>5000)db.deletedRecords=db.deletedRecords.slice(0,5000);
