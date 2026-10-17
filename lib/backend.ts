@@ -59,13 +59,13 @@ function independentRejection(error:unknown){
  return error instanceof ApiRejection&&/ya existe|ya está registrado|ya se encuentra|no se encontró|no encontrado|ya no existe|no puede figurar dos veces|debe verificarse|campo .* obligatorio|no (?:es )?válid|no reconocido|rango|seriales|requiere rol administrador|documento ya pertenece/i.test(error.message);
 }
 // Keep payloads and server work bounded; dependent changes retain their order.
-function synchronizationGroups(operations:OfflineOperation[]){
+function synchronizationGroups(operations:OfflineOperation[],version:number){
  const groups:OfflineOperation[][]=[];let group:OfflineOperation[]=[],bytes=0,keys=new Set<string>();
  const flush=()=>{if(group.length)groups.push(group);group=[];bytes=0;keys=new Set<string>();};
  for(const operation of operations){
   if(["createBatch","verifyBatch","externalUpsert"].includes(operation.action)){flush();groups.push([operation]);continue;}
   const operationBytes=new TextEncoder().encode(JSON.stringify(operation)).byteLength,operationIds=operationKeys(operation);
-  if(group.length>=5||bytes+operationBytes>64*1024||operationIds.some(id=>keys.has(id)))flush();
+  if(group.length>=(version>=7?50:5)||bytes+operationBytes>64*1024||(version<7&&operationIds.some(id=>keys.has(id))))flush();
   group.push(operation);bytes+=operationBytes;operationIds.forEach(id=>keys.add(id));
  }
  flush();return groups;
@@ -89,11 +89,15 @@ async function runSynchronization(){
    }
    if(!eligible.length)return;
    try{
-    const result=await request("sync",{operations:eligible.map(operation=>({id:operation.id,action:operation.action,data:operation.data}))},token);
+    const result=await request("sync",{syncProtocol:version>=7?"explosivos-receipts-v1":undefined,operations:eligible.map(operation=>({id:operation.id,action:operation.action,data:operation.data}))},token);
     validateInventory(result.records);
     const expected=new Set(eligible.map(operation=>operation.id));
-    if(!Array.isArray(result.processed)||result.processed.length!==expected.size||new Set(result.processed).size!==expected.size||result.processed.some((id:unknown)=>typeof id!=="string"||!expected.has(id)))throw new Error("El servidor no confirmó todos los pendientes enviados. Se conservan para reintentar.");
+    const rejections:SyncIssue[]=result.syncProtocol==="explosivos-receipts-v1"&&Array.isArray(result.rejected)?result.rejected:[];
+    const processed:unknown[]=Array.isArray(result.processed)?result.processed:[];
+    const receipts=[...processed,...rejections.map(issue=>issue?.id)];
+    if(!Array.isArray(result.processed)||receipts.length!==expected.size||new Set(receipts).size!==expected.size||receipts.some(id=>typeof id!=="string"||!expected.has(id))||rejections.some(issue=>!issue||typeof issue.message!=="string"||!issue.message.trim()))throw new Error("El servidor no confirmó todos los pendientes enviados. Se conservan para reintentar.");
     await acceptSnapshot(result.records,result.processed);
+    for(const issue of rejections)report(eligible.find(operation=>operation.id===issue.id)!,issue.message);
     latestRecords=result.records;
     window.dispatchEvent(new Event("explosivos-sync-progress"));
    }catch(error){
@@ -103,7 +107,7 @@ async function runSynchronization(){
     for(const operation of eligible)await sendGroup([operation]);
    }
   }
-  for(const group of synchronizationGroups(operations))await sendGroup(group);
+  for(const group of synchronizationGroups(operations,version))await sendGroup(group);
  }
  // Every successful sync already returns a full inventory. Avoid downloading it again.
  // Commit again locally to include changes queued while the final response was being handled.
@@ -138,3 +142,4 @@ export async function listSealPeople():Promise<{people:SealPerson[];warning?:str
  return {people:[...internal,...external],warning};
 }
 export async function saveExternalPerson(value:SealPerson){const person=sealPerson({...value,origen:"Externo"}),existing=await listSealPeople();if(existing.people.some(p=>p.documento===person.documento&&p.origen==="SK Admin"))throw new Error("Este documento ya pertenece a Personal de SK Admin. Selecciónalo en el buscador.");const rows=await getLocal<SealPerson[]>("sealExternalPeople",[]);await setLocal("sealExternalPeople",[...rows.filter(p=>p.documento!==person.documento),person]);await enqueue("externalUpsert",{person});return person;}
+

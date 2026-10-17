@@ -31,7 +31,7 @@ function doPost(e) {
     if (action === "sealPeople") return json_(sealPeople_());
     if (action === "externalUpsert") return json_(externalUpsert_(body.person,user.usuario,body.operationId));
     if (action === "list") return json_({ ok: true, records: publicRecords_(load_()) });
-    if (action === "sync") return json_(sync_(body.operations || [], user));
+    if (action === "sync") return json_(sync_(body.operations || [], user, body.syncProtocol));
     if (action === "create") return json_(create_(body.record || {}, user.usuario, body.operationId));
     if (action === "createBatch") return json_(createBatch_(body.batch || {}, user.usuario, body.operationId));
     if (action === "verifyBatch") return json_(verifyBatch_(body, user.usuario, body.operationId));
@@ -73,10 +73,44 @@ function save_(db) {
 function status_(token) {
   const db = load_(); let current = null;
   try { current = sessionFromDb_(db, token); } catch (_) {}
-  return { ok: true, apiVersion: 6, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
+  return { ok: true, apiVersion: 7, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
 }
 
-function sync_(operations,user) {
+// One durable commit per batch, with a receipt for every operation (SK/Plaza model).
+function sync_(operations,user,protocol) {
+  if(protocol!=="explosivos-receipts-v1")return legacySync_(operations,user);
+  if(!Array.isArray(operations))throw new Error("El lote de sincronización no es válido.");
+  if(operations.length>500)throw new Error("El lote supera el máximo de 500 operaciones.");
+  const ids=new Set();
+  operations.forEach(function(operation){const id=required_(operation&&operation.id,"operación");if(ids.has(id))throw new Error("ID de operación repetido en el lote.");ids.add(id);});
+  return locked_(function(db){
+    const processed=[],rejected=[],blocked=new Set();
+    operations.forEach(function(operation){
+      const id=String(operation.id),data=operation.data||{},keys=syncKeys_(operation);
+      // Already committed IDs are acknowledged before rechecking dependencies.
+      if(operationDone_(db,id)){processed.push(id);return;}
+      if(keys.some(function(key){return blocked.has(key);})){rejected.push({id:id,message:"Espera la confirmación de un cambio anterior de este registro."});keys.forEach(function(key){blocked.add(key);});return;}
+      // Isolate validation failures; no partial mutation can leak into the shared batch.
+      const draft=JSON.parse(JSON.stringify(db));
+      try {
+        const action=operation.action;
+        if(action==="externalUpsert")externalUpsert_(data.person,user.usuario,id,draft);
+        else if(action==="create")create_(data.record||{},user.usuario,id,draft);
+        else if(action==="createBatch")createBatch_(data.batch||{},user.usuario,id,draft);
+        else if(action==="verifyBatch")verifyBatch_(data,user.usuario,id,draft);
+        else if(action==="move")move_(data,user.usuario,id,draft);
+        else if(action==="deleteRecord")deleteRecord_(data,user,id,draft);
+        else throw new Error("Operación pendiente no reconocida: "+action);
+        Object.keys(draft).forEach(function(key){db[key]=draft[key];});processed.push(id);
+      } catch(error) {
+        rejected.push({id:id,message:String(error.message||error)});
+        keys.forEach(function(key){blocked.add(key);});
+      }
+    });
+    return {ok:true,apiVersion:7,syncProtocol:"explosivos-receipts-v1",processed:processed,rejected:rejected,records:publicRecords_(db)};
+  });
+}
+function legacySync_(operations,user) {
   if(!Array.isArray(operations))throw new Error("El lote de sincronización no es válido.");
   if(operations.length>500)throw new Error("El lote supera el máximo de 500 operaciones.");
   const processed=[];
@@ -95,6 +129,18 @@ function sync_(operations,user) {
   });
   return {ok:true,apiVersion:6,processed:processed,records:publicRecords_(load_())};
 }
+
+
+function syncKeys_(operation){
+ const d=operation.data||{};
+ if(d.record)return [d.record.tipo+":"+d.record.id];
+ if(d.batch)return (d.batch.items||[]).map(function(r){return d.batch.tipo+":"+r.id;});
+ if(Array.isArray(d.unidades))return d.unidades.map(function(r){return d.tipo+":"+r.id;});
+ if(d.id!=null)return [d.tipo+":"+d.id];
+ return d.person?["person:"+d.person.documento]:[];
+}
+// Direct legacy requests retain their own lock. Batch handlers share the outer lock.
+function mutate_(db,fn){return db?fn(db):locked_(fn);}
 
 function bootstrap_(body) {
   return locked_(function(db) {
@@ -127,8 +173,8 @@ function sessionFromDb_(db,token) {
   if(!account)throw new Error("El usuario no está activo."); return {usuario:account.usuario,nombre:account.nombre,rol:account.rol,protegido:account.protegido===true};
 }
 
-function create_(r,usuario,operationId) {
-  return locked_(function(db) {
+function create_(r,usuario,operationId,batchDb) {
+  return mutate_(batchDb,function(db) {
     if(operationDone_(db,operationId))return {ok:true,repeated:true};
     const type=required_(r.tipo,"tipo"); if(!db.records[type])throw new Error("Tipo de registro no reconocido.");
     const base={id:r.id||Utilities.getUuid(),fechaRegistro:r.fechaRegistro||iso_(),usuario:usuario}; let item;
@@ -159,8 +205,8 @@ function create_(r,usuario,operationId) {
   });
 }
 
-function createBatch_(r,usuario,operationId) {
-  return locked_(function(db) {
+function createBatch_(r,usuario,operationId,batchDb) {
+  return mutate_(batchDb,function(db) {
     if(operationDone_(db,operationId))return {ok:true,repeated:true};
     const type=required_(r.tipo,"tipo"); if(type!=="INDUGEL"&&type!=="ANFO")throw new Error("El ingreso por rangos solo está disponible para INDUGEL y ANFO.");
     if(!Array.isArray(r.rangos)||!r.rangos.length)throw new Error("Debes agregar al menos un rango de seriales.");
@@ -177,8 +223,8 @@ function createBatch_(r,usuario,operationId) {
   });
 }
 
-function verifyBatch_(body,usuario,operationId) {
-  return locked_(function(db) {
+function verifyBatch_(body,usuario,operationId,batchDb) {
+  return mutate_(batchDb,function(db) {
     if(operationDone_(db,operationId))return {ok:true,repeated:true};
     const type=required_(body.tipo,"tipo"); if(type!=="INDUGEL"&&type!=="ANFO")throw new Error("Tipo de material no válido para verificación.");
     if(!Array.isArray(body.unidades)||!body.unidades.length)throw new Error("Debes marcar al menos un serial como REVISADO / INGRESAR.");
@@ -188,8 +234,8 @@ function verifyBatch_(body,usuario,operationId) {
   });
 }
 
-function move_(body,usuario,operationId) {
-  return locked_(function(db) {
+function move_(body,usuario,operationId,batchDb) {
+  return mutate_(batchDb,function(db) {
     if(operationDone_(db,operationId))return {ok:true,repeated:true};
     const tipo=required_(body.tipo,"tipo"); if(tipo==="SELLOS"||!db.records[tipo])throw new Error("Tipo de material no válido.");
     const item=db.records[tipo].find(x=>x.id===required_(body.id,"registro")); if(!item)throw new Error("Registro no encontrado."); if((tipo==="INDUGEL"||tipo==="ANFO")&&item.verificado===false)throw new Error("El serial debe verificarse antes de registrar movimientos.");
@@ -200,9 +246,9 @@ function move_(body,usuario,operationId) {
   });
 }
 
-function deleteRecord_(body,user,operationId) {
+function deleteRecord_(body,user,operationId,batchDb) {
   requireAdmin_(user);
-  return locked_(function(db) {
+  return mutate_(batchDb,function(db) {
     if(operationDone_(db,operationId))return {ok:true,repeated:true};
     const tipo=required_(body.tipo,"tipo");if(tipo==="SELLOS"||!db.records[tipo])throw new Error("Tipo de material no válido para eliminación.");
     const id=required_(body.id,"registro");const index=db.records[tipo].findIndex(function(item){return String(item.id)===id;});
@@ -249,9 +295,10 @@ function centralSealPeople_(){
 }
 function sealPerson_(p){p=p||{};return {documento:required_(p.documento,"documento del participante"),nombre:required_(p.nombre,"nombre del participante"),cargo:required_(p.cargo,"cargo del participante"),empresa:required_(p.empresa,"empresa del participante"),area:String(p.area||""),origen:p.origen==="SK Admin"?"SK Admin":"Externo"};}
 function sealPeople_(){let internal=[],warning="";try{internal=centralSealPeople_();}catch(error){warning=String(error.message||error);}return {ok:true,internal:internal,external:load_().externalPeople||[],warning:warning};}
-function externalUpsert_(p,usuario,operationId){
+function externalUpsert_(p,usuario,operationId,batchDb){
  const person=sealPerson_(p);person.origen="Externo";
  let internal=[];try{internal=centralSealPeople_();}catch(_){}
  if(internal.some(function(row){return row.documento===person.documento;}))throw new Error("El documento ya pertenece a Personal de SK Admin.");
- return locked_(function(db){if(operationDone_(db,operationId))return {ok:true,repeated:true};db.externalPeople=db.externalPeople||[];const existing=db.externalPeople.find(function(row){return row.documento===person.documento;});const now=iso_();if(existing)Object.assign(existing,person,{updatedAt:now,updatedBy:usuario});else db.externalPeople.push(Object.assign({},person,{createdAt:now,createdBy:usuario}));markOperation_(db,operationId);return {ok:true,person:person};});
+ return mutate_(batchDb,function(db){if(operationDone_(db,operationId))return {ok:true,repeated:true};db.externalPeople=db.externalPeople||[];const existing=db.externalPeople.find(function(row){return row.documento===person.documento;});const now=iso_();if(existing)Object.assign(existing,person,{updatedAt:now,updatedBy:usuario});else db.externalPeople.push(Object.assign({},person,{createdAt:now,createdBy:usuario}));markOperation_(db,operationId);return {ok:true,person:person};});
 }
+

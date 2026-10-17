@@ -10,21 +10,35 @@ const clone = value => structuredClone(value);
 const blank = () => ({ INDUGEL: [], ANFO: [], 'MECHA DE SEGURIDAD': [], DETONADORES: [], SELLOS: [] });
 const record = serial => ({ tipo: 'ANFO', serial, fechaFabricacion: '2026-01-01', fechaVencimiento: '2027-01-01', fechaIngreso: '2026-10-17', ubicacion: 'Polvorín superficie' });
 const deferred = () => { let resolve; const promise = new Promise(r => resolve = r); return { promise, resolve }; };
-function harness() {
+function harness(version = 7, role = "ADMINISTRADOR") {
   const local = new Map([['control_explosivos_token', 'token'], ['control_explosivos_user', JSON.stringify({ usuario: 'audit', nombre: 'Audit', rol: 'ADMINISTRADOR' })]]);
   const server = { Utilities: { getUuid: () => crypto.randomUUID() } };
   vm.createContext(server);
   vm.runInContext(fs.readFileSync(path.join(root, 'apps-script/Code.gs'), 'utf8'), server);
-  let db = server.emptyDb_();
+  let db = server.emptyDb_(), writes = 0, failWrite = false;
   server.load_ = () => clone(db);
-  server.locked_ = fn => { const draft = clone(db); const result = fn(draft); db = draft; return result; };
+  server.locked_ = fn => { const draft = clone(db); const result = fn(draft); if(failWrite)throw new Error("Drive no disponible");db = draft; writes++;return result; };
   const calls = [], events = [];
   let intercept = null;
   const defaultReply = body => {
-    if (body.action === 'status') return { ok: true, apiVersion: 6, authenticated: true, usuario: { usuario: 'audit' } };
+    if (body.action === 'status') return { ok: true, apiVersion: version, authenticated: true, usuario: { usuario: 'audit' } };
     if (body.action === 'list') return { ok: true, records: clone(db.records) };
     if (body.action === 'sync') {
-      try { return server.sync_(body.operations, { usuario: 'audit', rol: 'ADMINISTRADOR' }); }
+      try {
+        const user={ usuario: 'audit', rol: role };
+        if(version>=7)return server.sync_(body.operations,user,body.syncProtocol);
+        const processed=[];
+        for(const op of body.operations){const data=op.data||{},id=op.id;
+          if(op.action==='create')server.create_(data.record,user.usuario,id);
+          else if(op.action==='move')server.move_(data,user.usuario,id);
+          else if(op.action==='createBatch')server.createBatch_(data.batch,user.usuario,id);
+          else if(op.action==='verifyBatch')server.verifyBatch_(data,user.usuario,id);
+          else if(op.action==='deleteRecord')server.deleteRecord_(data,user,id);
+          else throw new Error('Operación pendiente no reconocida');
+          processed.push(id);
+        }
+        return {ok:true,apiVersion:6,processed,records:clone(db.records)};
+      }
       catch (error) { return { ok: false, error: error.message }; }
     }
     if (body.action === 'login') return { ok: true, token: 'fresh-token', usuario: { usuario: body.usuario, nombre: 'Audit', rol: 'ADMINISTRADOR' } };
@@ -52,7 +66,7 @@ function harness() {
     return module.exports;
   }
   return { backend: load('lib/backend.ts'), store: load('lib/offline-store.ts'), state: load('lib/sync-state.ts'), context, local, calls, events,
-    get db() { return db; }, setIntercept: value => { intercept = value; } };
+    get db() { return db; }, get writes(){return writes;}, failWrite:()=>{failWrite=true;}, server, setIntercept: value => { intercept = value; } };
 }
 const tests = [];
 function test(name, run) { tests.push({ name, run }); }
@@ -191,18 +205,18 @@ test('superposición conserva verificaciones, movimientos y eliminaciones', asyn
   assert.equal(remote.ANFO.length, 2, 'The server snapshot is not mutated');
 });
 
-test('27 pendientes válidos requieren 7 solicitudes en lugar de 29', async () => {
+test('27 pendientes válidos requieren 2 solicitudes y una escritura central', async () => {
   const h = harness();
   for (let i = 0; i < 27; i++) await h.backend.saveRecord(record(100 + i));
   const result = await h.backend.synchronize();
   assert.equal(result.pending, 0); assert.equal(h.db.records.ANFO.length, 27);
-  assert.equal(h.calls.length, 7);
-  assert.deepEqual(h.calls.filter(x => x.action === 'sync').map(x => x.operations.length), [5, 5, 5, 5, 5, 2]);
+  assert.equal(h.calls.length, 2);assert.equal(h.writes, 1);
+  assert.deepEqual(h.calls.filter(x => x.action === 'sync').map(x => x.operations.length), [27]);
   assert.equal(h.calls.filter(x => x.action === 'list').length, 0);
 });
 
-test('rechazo a mitad del grupo reintenta los confirmados sin duplicarlos', async () => {
-  const h = harness(); h.db.records.ANFO.push({ ...record(102), id: 'remote-existing' });
+test('servidor anterior: rechazo a mitad del grupo reintenta sin duplicar', async () => {
+  const h = harness(6); h.db.records.ANFO.push({ ...record(102), id: 'remote-existing' });
   for (let i = 0; i < 5; i++) await h.backend.saveRecord(record(100 + i));
   const result = await h.backend.synchronize();
   assert.equal(result.pending, 1); assert.equal(result.issues.length, 1);
@@ -213,8 +227,8 @@ test('rechazo a mitad del grupo reintenta los confirmados sin duplicarlos', asyn
   assert.equal(calls[1].operations[0].id, calls[0].operations[0].id);
 });
 
-test('cambios del mismo registro mantienen el orden entre grupos', async () => {
-  const h = harness();
+test('servidor anterior: cambios dependientes mantienen el orden', async () => {
+  const h = harness(6);
   const saved = await h.backend.saveRecord(record(100));
   await h.backend.moveRecord('ANFO', saved.id, 'Polvorín interior de mina', '2026-10-17T12:00:00.000Z');
   await h.backend.moveRecord('ANFO', saved.id, 'Polvorín superficie', '2026-10-17T13:00:00.000Z');
@@ -282,7 +296,49 @@ test('validar la misma sesión no dispara otra recarga de inventario', async () 
   assert.equal(h.events.filter(event => event === 'explosivos-access-updated').length, 0);
 });
 
+test('operador: crear, verificar y mover no exige rol administrador', async () => {
+ const h=harness(7,'OPERADOR');
+ await h.backend.saveBatchRecords({...record(300),rangos:[{desde:300,hasta:300}]});
+ const item=(await h.store.getCachedRecords()).ANFO[0];
+ await h.backend.verifyBatchRecords('ANFO',[{id:item.id,fechaFabricacion:'2026-01-01',fechaVencimiento:'2027-01-01'}]);
+ await h.backend.moveRecord('ANFO',item.id,'Polvorín interior de mina','2026-10-17T12:00:00.000Z');
+ const result=await h.backend.synchronize();assert.equal(result.pending,0);assert.equal(h.db.records.ANFO[0].ubicacion,'Polvorín interior de mina');
+});
+test('operador: eliminación rechazada no bloquea otros registros',async()=>{
+ const h=harness(7,'OPERADOR');h.db.records.ANFO.push({...record(100),id:'existing'});
+ await h.store.acceptSnapshot(h.db.records);await h.backend.deleteRecord('ANFO','existing');await h.backend.saveRecord(record(101));
+ const result=await h.backend.synchronize();assert.equal(result.pending,1);assert.match(result.issues[0].message,/rol administrador/);
+ assert.equal(h.db.records.ANFO.length,2);assert.equal(h.writes,1);assert.equal(h.calls.length,2);
+});
+test('recibos individuales identifican rechazo y dependencias dentro del mismo lote',async()=>{
+ const h=harness();h.db.records.ANFO.push({...record(100),id:'existing'});
+ const item=await h.backend.saveRecord(record(100));
+ await h.backend.moveRecord('ANFO',item.id,'Polvorín interior de mina','2026-10-17T12:00:00.000Z');
+ await h.backend.saveRecord(record(101));
+ const result=await h.backend.synchronize();assert.equal(result.pending,2);assert.equal(result.issues.length,2);assert.equal(h.calls.length,2);assert.equal(h.writes,1);
+ assert.match(result.issues[1].message,/cambio anterior/);
+});
+test('fallo de escritura central conserva todos los pendientes sin confirmar',async()=>{
+ const h=harness();await h.backend.saveRecord(record(100));h.failWrite();
+ await assert.rejects(h.backend.synchronize(),/Drive no disponible/);assert.equal(h.db.records.ANFO.length,0);assert.equal((await h.store.getOperations()).length,1);
+});
+test('recibos contradictorios o de otro ID nunca consumen la cola',async()=>{
+ for(const corrupt of [r=>r.rejected.push({id:r.processed[0],message:'rechazado'}),r=>{r.processed=[];r.rejected=[{id:'otro-id',message:'rechazado'}]},r=>{r.processed=[];r.rejected=[{id:r.rejected[0]?.id,message:''}]}]){
+  const h=harness();await h.backend.saveRecord(record(100));h.setIntercept((body,reply)=>{const r=reply(body);if(body.action==='sync')corrupt(r);return r;});
+  await assert.rejects(h.backend.synchronize(),/no confirmó/);assert.equal((await h.store.getOperations()).length,1);
+ }
+});
+test('más de 50 operaciones se confirman por lotes limitados',async()=>{
+ const h=harness();for(let n=100;n<161;n++)await h.backend.saveRecord(record(n));
+ const result=await h.backend.synchronize();assert.equal(result.pending,0);assert.equal(h.writes,2);assert.deepEqual(h.calls.filter(r=>r.action==='sync').map(r=>r.operations.length),[50,11]);
+});
+test('servidor anterior conserva lotes de cinco y confirmaciones completas',async()=>{
+ const h=harness(6);for(let n=100;n<127;n++)await h.backend.saveRecord(record(n));
+ const result=await h.backend.synchronize();assert.equal(result.pending,0);assert.equal(h.calls.length,7);assert.equal(h.writes,27);
+});
+
 (async () => {
   for (const { name, run } of tests) { await run(); console.log('PASS:', name); }
   console.log(`${tests.length} pruebas de sincronización superadas; sin acceso a datos reales.`);
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
