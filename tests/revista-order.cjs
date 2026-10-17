@@ -54,22 +54,31 @@ test('entrar y finalizar sin checks no crea registros',async()=>{
 test('orden numérico, dos criterios y fechas ausentes en ambos sentidos',()=>{
  const {compareInventory}=load('lib/inventory-order.ts');
  const rows=[{serial:10,fechaIngreso:'2026-01-01'},{serial:2,fechaIngreso:'2026-01-01'},{serial:3,fechaIngreso:'2026-01-02'},{serial:4,fechaIngreso:''}];
- const sort=(criteria,direction)=>[...rows].sort((a,b)=>compareInventory(a,b,criteria,direction)).map(r=>r.serial);
+ const sort=(criteria,direction)=>[...rows].sort((a,b)=>compareInventory(a,b,criteria.map(field=>({field,direction})))).map(r=>r.serial);
  assert.deepEqual(sort(['SERIAL'],'ASC'),[2,3,4,10]);assert.deepEqual(sort(['SERIAL'],'DESC'),[10,4,3,2]);
  assert.deepEqual(sort(['INGRESO','SERIAL'],'ASC'),[2,10,3,4]);assert.deepEqual(sort(['INGRESO','SERIAL'],'DESC'),[3,10,2,4]);
 });
 test('vencimiento ascendente: vencidos, próximos, lejanos y sin fecha al final',()=>{
  const {compareInventory}=load('lib/inventory-order.ts');
  const rows=[{serial:1,fechaVencimiento:'2028-01-01'},{serial:2,fechaVencimiento:''},{serial:3,fechaVencimiento:'2026-01-01'},{serial:4,fechaVencimiento:'2026-10-18'},{serial:5,fechaVencimiento:'2026-10-17'},{serial:6,fechaVencimiento:'2026-02-30'}];
- const sort=direction=>[...rows].sort((a,b)=>compareInventory(a,b,['VENCIMIENTO','SERIAL'],direction)).map(r=>r.serial);
+ const sort=direction=>[...rows].sort((a,b)=>compareInventory(a,b,[{field:'VENCIMIENTO',direction},{field:'SERIAL',direction}])).map(r=>r.serial);
  assert.deepEqual(sort('ASC'),[3,5,4,1,2,6]);assert.deepEqual(sort('DESC'),[1,4,5,3,6,2]);
 });
 test('ingreso, último traslado y vencimiento son criterios independientes',()=>{
  const {compareInventory,inventoryDateFor}=load('lib/inventory-order.ts');
  const rows=[{serial:1,fechaIngreso:'2026-01-01',fechaVencimiento:'2027-04-01',movimientos:[{destino:'Polvorín interior de mina',fecha:'2026-02-01'},{destino:'Polvorín interior de mina',fecha:'2026-04-01'}]},{serial:2,fechaIngreso:'2026-02-01',fechaVencimiento:'2027-01-01',movimientos:[{destino:'Polvorín interior de mina',fecha:'2026-03-01'},{destino:'Polvorín superficie',fecha:'2026-05-01'}]}];
- const sort=field=>[...rows].sort((a,b)=>compareInventory(a,b,[field],'ASC')).map(r=>r.serial);
+ const sort=field=>[...rows].sort((a,b)=>compareInventory(a,b,[{field,direction:'ASC'}])).map(r=>r.serial);
  assert.deepEqual(sort('INGRESO'),[1,2]);assert.deepEqual(sort('TRASLADO'),[2,1]);assert.deepEqual(sort('VENCIMIENTO'),[2,1]);
  assert.equal(inventoryDateFor(rows[0],'TRASLADO'),'2026-04-01');assert.equal(inventoryDateFor(rows[1],'INGRESO'),'2026-02-01');assert.equal(inventoryDateFor(rows[1],'VENCIMIENTO'),'2027-01-01');
+});
+
+test('cada criterio aplica su propio sentido al resolver empates',()=>{
+ const {compareInventory}=load('lib/inventory-order.ts');
+ const rows=[{serial:2,fechaVencimiento:'2026-01-01'},{serial:10,fechaVencimiento:'2026-01-01'},{serial:1,fechaVencimiento:'2026-02-01'},{serial:20,fechaVencimiento:'2026-02-01'}];
+ const sort=(dateDirection,serialDirection)=>[...rows].sort((a,b)=>compareInventory(a,b,[{field:'VENCIMIENTO',direction:dateDirection},{field:'SERIAL',direction:serialDirection}])).map(r=>r.serial);
+ assert.deepEqual(sort('ASC','DESC'),[10,2,20,1]);assert.deepEqual(sort('DESC','ASC'),[1,20,2,10]);
+ assert.deepEqual(sort('ASC','ASC'),[2,10,1,20]);assert.deepEqual(sort('DESC','DESC'),[20,1,10,2]);
+ assert.deepEqual([...rows].sort((a,b)=>compareInventory(a,b,[])).map(r=>r.serial),[2,10,1,20]);
 });
 
 (async()=>{for(const {name,run} of tests){await run();console.log('PASS:',name);}console.log(tests.length+' pruebas de revista y orden superadas.');})().catch(error=>{console.error(error);process.exitCode=1;});

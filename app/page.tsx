@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getLocal } from "@/lib/offline-store";
 import { useRevista } from "@/lib/use-revista";
-import { compareInventory, inventoryDateFor, inventoryOrderLabels, inventoryOrderOptions, transferDate, type InventoryDateField, type InventoryOrder, type OrderDirection } from "@/lib/inventory-order";
+import { compareInventory, inventoryDateFor, inventoryOrderLabels, inventoryOrderOptions, transferDate, type InventoryDateField, type InventoryOrder, type InventorySort } from "@/lib/inventory-order";
 import { RecordDialog } from "@/components/record-dialog";
 import { AccessDialog } from "@/components/access-dialog";
 import { MovementDialog } from "@/components/movement-dialog";
@@ -76,8 +76,7 @@ export default function Home() {
   const [dateFilter,setDateFilter]=useState("");
   const [dateFilterField,setDateFilterField]=useState<InventoryDateField>("TRASLADO");
   const [exporting,setExporting]=useState(false);
-  const [inventoryOrder,setInventoryOrder]=useState<InventoryOrder[]>(["TRASLADO"]);
-  const [orderDirection,setOrderDirection]=useState<OrderDirection>("ASC");
+  const [inventoryOrder,setInventoryOrder]=useState<InventorySort[]>([{field:"TRASLADO",direction:"ASC"}]);
   const [verificationFilter,setVerificationFilter]=useState("TODOS");
   const [verificationSignal,setVerificationSignal]=useState(0);
   const [materialViews,setMaterialViews]=useState<Record<string,number>>({});
@@ -175,8 +174,8 @@ export default function Home() {
   const selectedLocationLabel = selectedLocation === "all" ? "Todos los lugares" : selectedLocation === "interior" ? "Polvorín" : "Almacén";
   const selectedLocationValue = selectedLocation === "interior" ? "Polvorín interior de mina" : "Polvorín superficie";
   const selectedRecords = useMemo(
-    () => (records[selected] || []).filter(record => selected === "SELLOS" || selectedLocation === "all" || record.ubicacion === selectedLocationValue).filter((record) => JSON.stringify(record).toLowerCase().includes(query.toLowerCase())).filter(record=>!dateFilter||(selected==="SELLOS"?String(record.fecha||""):inventoryDateFor(record,dateFilterField)).slice(0,10)===dateFilter).filter(record=>verificationFilter==="TODOS"||(verificationFilter==="VERIFICADOS"?record.verificado!==false:record.verificado===false)).sort((a,b)=>selected==="SELLOS"?0:compareInventory(a,b,inventoryOrder,orderDirection)),
-    [records, selected, selectedLocation, selectedLocationValue, query,dateFilter,dateFilterField,verificationFilter,inventoryOrder,orderDirection],
+    () => (records[selected] || []).filter(record => selected === "SELLOS" || selectedLocation === "all" || record.ubicacion === selectedLocationValue).filter((record) => JSON.stringify(record).toLowerCase().includes(query.toLowerCase())).filter(record=>!dateFilter||(selected==="SELLOS"?String(record.fecha||""):inventoryDateFor(record,dateFilterField)).slice(0,10)===dateFilter).filter(record=>verificationFilter==="TODOS"||(verificationFilter==="VERIFICADOS"?record.verificado!==false:record.verificado===false)).sort((a,b)=>selected==="SELLOS"?0:compareInventory(a,b,inventoryOrder)),
+    [records, selected, selectedLocation, selectedLocationValue, query,dateFilter,dateFilterField,verificationFilter,inventoryOrder],
   );
   const visibleRecords = selected === "SELLOS" || !revistaActive ? selectedRecords : selectedRecords.filter(record => revistaFilter === "TODOS" || (revistaFilter === "MARCADOS" ? revista.checked(selected, record) : !revista.checked(selected, record)));
   const checkedCount = selectedRecords.filter(record => revista.checked(selected, record)).length;
@@ -184,7 +183,7 @@ export default function Home() {
     const headers=["Serial / caja","Ubicación","Fecha de ingreso","Fecha de traslado al polvorín","Fabricación","Vencimiento","Lote / contenido","Verificación de entrada","Fecha de revista","Check de revista"];
     const rows=visibleRecords.map(r=>[String(r.serial||r.cajaNumero||r.id),String(r.ubicacion||""),String(r.fechaIngreso||""),transferDate(r).slice(0,10),String(r.fechaFabricacion||r.fechaProduccion||""),String(r.fechaVencimiento||""),String(r.loteProduccion||r.contenido||""),r.verificado===false?"Pendiente":"Verificado",revista.date,revista.checked(selected,r)?"✓":""]);
     const title=selected+" · "+selectedLocationLabel, filename="Explosivos_"+selected.replaceAll(" ","_")+"_"+selectedLocationLabel+"_Revista_"+revista.date;
-    const detail=[rows.length+" registros","Orden: "+inventoryOrder.map(order=>inventoryOrderLabels[order]).join(" → ")+(orderDirection==="ASC"?" ascendente":" descendente"),query?"Búsqueda: "+query:"",dateFilter?inventoryOrderLabels[dateFilterField]+" exacta: "+dateFilter:"","Verificación de entrada: "+verificationFilter,"Revista: "+revista.date,"Responsable: "+(currentUser?.nombre||currentUser?.usuario||""),"Revista: "+(revistaActive?revistaFilter:"TODOS"),"Check = encontrado; vacío = sin marcar","Marcas guardadas en este dispositivo"].filter(Boolean).join(" · ");
+    const detail=[rows.length+" registros","Orden: "+(inventoryOrder.map(order=>inventoryOrderLabels[order.field]+(order.direction==="ASC"?" ascendente":" descendente")).join(" → ")||"sin criterios"),query?"Búsqueda: "+query:"",dateFilter?inventoryOrderLabels[dateFilterField]+" exacta: "+dateFilter:"","Verificación de entrada: "+verificationFilter,"Revista: "+revista.date,"Responsable: "+(currentUser?.nombre||currentUser?.usuario||""),"Revista: "+(revistaActive?revistaFilter:"TODOS"),"Check = encontrado; vacío = sin marcar","Marcas guardadas en este dispositivo"].filter(Boolean).join(" · ");
     if(format==="excel"){const XLSX=await import("xlsx");const sheet=XLSX.utils.aoa_to_sheet([[title],[detail],[],headers,...rows]);sheet["!cols"]=headers.map((h,i)=>({wch:Math.min(45,Math.max(h.length,...rows.map(row=>row[i].length))+2)}));const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,"Inventario");XLSX.writeFile(book,filename+".xlsx");}
     else {const [{jsPDF},{default:autoTable}]=await Promise.all([import("jspdf"),import("jspdf-autotable")]);const doc=new jsPDF({orientation:"landscape"});doc.setFontSize(14);doc.text(title,14,16);doc.setFontSize(9);const lines=doc.splitTextToSize(detail,268);doc.text(lines,14,23);autoTable(doc,{head:[headers],body:rows.map(row=>row.map((cell,index)=>index===9?(cell?"X":""):cell)),startY:28+lines.length*4,styles:{fontSize:7,cellPadding:2},headStyles:{fillColor:[13,44,62]},margin:{bottom:15},didDrawPage:()=>{doc.setFontSize(8);doc.text("CONTROL EXPLOSIVOS SK · Página "+doc.getNumberOfPages(),14,doc.internal.pageSize.getHeight()-7);}});doc.save(filename+".pdf");}
   }catch(cause){window.alert(cause instanceof Error?cause.message:"No se pudo exportar.");}finally{setExporting(false);}}
@@ -302,17 +301,29 @@ export default function Home() {
             </div>}
             {selected!=="SELLOS"&&<div className="border-b px-5 py-3">
               <div className="flex flex-wrap items-end gap-3">
-                <Button type="button" variant="outline" size="sm" aria-pressed={orderDirection==="DESC"} title={orderDirection==="ASC"?"Cambiar a orden descendente":"Cambiar a orden ascendente"} onClick={()=>setOrderDirection(current=>current==="ASC"?"DESC":"ASC")}>{orderDirection==="ASC"?"↑ ORDEN ASCENDENTE":"↓ ORDEN DESCENDENTE"}</Button>
-                {inventoryOrder.map((order,index)=><label key={index} className="grid gap-1 text-xs font-semibold text-slate-600">{index===0?"PRIMER CRITERIO":"LUEGO POR"}
-                  <select aria-label={index===0?"Primer criterio de orden":"Segundo criterio de orden"} value={order} className="h-9 rounded-md border bg-white px-3 text-sm" onChange={e=>{
-                    const value=e.target.value as InventoryOrder;
-                    setInventoryOrder(current=>{const duplicate=current.indexOf(value);return current.map((criterion,i)=>i===index?value:i===duplicate?current[index]:criterion);});
-                    if(index===0&&value==="VENCIMIENTO")setOrderDirection("ASC");
-                  }}>{inventoryOrderOptions.map(value=><option key={value} value={value}>{inventoryOrderLabels[value].toUpperCase()}</option>)}</select>
-                </label>)}
-                {inventoryOrder.length===1?<Button type="button" variant="outline" size="sm" onClick={()=>setInventoryOrder(current=>[...current,current[0]==="SERIAL"?"INGRESO":"SERIAL"])}>+ AGREGAR CRITERIO</Button>:<Button type="button" variant="ghost" size="sm" onClick={()=>setInventoryOrder(current=>[current[0]])}>QUITAR SEGUNDO CRITERIO</Button>}
+                {inventoryOrder.map((order,index)=><div key={order.field} className="grid gap-1">
+                  <span className="text-xs font-semibold text-slate-600">{index===0?"PRIMER CRITERIO":`LUEGO POR (${index+1})`}</span>
+                  <Button type="button" variant="outline" size="sm"
+                    aria-label={`${inventoryOrderLabels[order.field]}: orden ${order.direction==="ASC"?"ascendente":"descendente"}. Tocar para invertir`}
+                    title={`Cambiar ${inventoryOrderLabels[order.field].toLowerCase()} a orden ${order.direction==="ASC"?"descendente":"ascendente"}`}
+                    onClick={()=>setInventoryOrder(current=>current.map(item=>item.field===order.field?{...item,direction:item.direction==="ASC"?"DESC":"ASC"}:item))}
+                    className="justify-between gap-3">
+                    <span>{inventoryOrderLabels[order.field].toUpperCase()}</span>
+                    <span aria-hidden="true" className="text-lg leading-none">{order.direction==="ASC"?"↑":"↓"}</span>
+                  </Button>
+                </div>)}
+                <select aria-label="Agregar o quitar criterios de orden" value="" className="h-9 max-w-full rounded-md border bg-white px-3 text-sm font-medium" onChange={event=>{
+                  const [action,field]=event.target.value.split(":") as [string,InventoryOrder];
+                  if(!inventoryOrderOptions.includes(field))return;
+                  setInventoryOrder(current=>action==="remove"?current.filter(item=>item.field!==field):current.some(item=>item.field===field)?current:[...current,{field,direction:"ASC"}]);
+                }}>
+                  <option value="" disabled>{inventoryOrder.length<inventoryOrderOptions.length?"+ AGREGAR CRITERIO":"EDITAR CRITERIOS"}</option>
+                  {inventoryOrder.length<inventoryOrderOptions.length&&<optgroup label="Agregar criterio">{inventoryOrderOptions.filter(field=>!inventoryOrder.some(order=>order.field===field)).map(field=><option key={field} value={`add:${field}`}>{inventoryOrderLabels[field]}</option>)}</optgroup>}
+                  {inventoryOrder.length>0&&<optgroup label="Quitar criterio">{inventoryOrder.map(order=><option key={order.field} value={`remove:${order.field}`}>Quitar {inventoryOrderLabels[order.field].toLowerCase()}</option>)}</optgroup>}
+                </select>
               </div>
-              {inventoryOrder[0]==="VENCIMIENTO"&&<p className="mt-2 text-xs text-slate-600">{orderDirection==="ASC"?"Primero los vencidos, luego los próximos a vencer y al final los de vencimiento más lejano.":"Primero los de vencimiento más lejano, luego los próximos a vencer y al final los vencidos."} Los registros sin fecha válida quedan al final de la lista.</p>}
+              <p className="mt-2 text-xs text-slate-500">{inventoryOrder.length?"Toca cada criterio para alternar ↑ ascendente / ↓ descendente. Se aplican de izquierda a derecha.":"Agrega un criterio para ordenar los registros."}</p>
+              {inventoryOrder[0]?.field==="VENCIMIENTO"&&<p className="mt-1 text-xs text-slate-600">{inventoryOrder[0].direction==="ASC"?"Primero los vencidos, luego los próximos a vencer y al final los de vencimiento más lejano.":"Primero los de vencimiento más lejano, luego los próximos a vencer y al final los vencidos."} Los registros sin fecha válida quedan al final de la lista.</p>}
             </div>}
             <div role="search" aria-label="Buscar en el material seleccionado" className="min-w-0 border-b border-slate-200 bg-slate-50/70 px-4 py-3 sm:px-5">
               <div className="mb-2 flex items-center justify-between gap-2">

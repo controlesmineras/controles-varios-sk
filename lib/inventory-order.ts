@@ -1,6 +1,7 @@
 export type InventoryOrder = "INGRESO" | "TRASLADO" | "VENCIMIENTO" | "SERIAL";
 export type InventoryDateField = Exclude<InventoryOrder, "SERIAL">;
 export type OrderDirection = "ASC" | "DESC";
+export type InventorySort = { field: InventoryOrder; direction: OrderDirection };
 
 export const inventoryOrderLabels: Record<InventoryOrder, string> = {
   INGRESO: "Fecha de ingreso", TRASLADO: "Fecha de traslado",
@@ -29,9 +30,9 @@ export function inventoryDateFor(record: Record<string, unknown>, field: Invento
 
 export function compareInventory(
   a: Record<string, unknown>, b: Record<string, unknown>,
-  criteria: InventoryOrder[], direction: OrderDirection,
+  criteria: InventorySort[],
 ) {
-  for (const criterion of criteria) {
+  for (const { field: criterion, direction } of criteria) {
     const av = criterion === "SERIAL" ? String(a.serial ?? a.cajaNumero ?? "") : inventoryDateFor(a, criterion);
     const bv = criterion === "SERIAL" ? String(b.serial ?? b.cajaNumero ?? "") : inventoryDateFor(b, criterion);
     // Missing values stay at the end in both directions.

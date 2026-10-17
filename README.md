@@ -12,9 +12,11 @@ Consulte `apps-script/README.md` para conectar el backend antes de utilizar la a
 
 ## Orden del inventario
 
-El botón **ORDEN ASCENDENTE / ORDEN DESCENDENTE** alterna la dirección de los criterios seleccionados (fecha de ingreso, fecha de traslado, fecha de vencimiento o serial). El segundo criterio resuelve los empates del primero; **AGREGAR CRITERIO** permite combinar dos criterios distintos. Los seriales se ordenan numéricamente y los valores sin fecha válida quedan al final en ambos sentidos.
+Cada criterio es un botón con su nombre y una flecha a la derecha: **↑ ascendente** o **↓ descendente**. Al tocarlo se invierte solo ese criterio. Los criterios disponibles son fecha de ingreso, fecha de traslado, fecha de vencimiento y serial; se aplican de izquierda a derecha. Cada criterio posterior resuelve los empates de los anteriores.
 
-Al elegir **Fecha de vencimiento** como primer criterio se activa el orden ascendente: vencidos primero, después los de vencimiento próximo y por último los más lejanos. Puede invertirse con el mismo botón de orden. Excel y PDF respetan los criterios y el orden visible.
+**AGREGAR CRITERIO** añade un criterio distinto, siempre ascendente. El mismo menú permite quitar criterios. Se pueden combinar hasta los cuatro, sin repetirlos; al usar todos, el menú se llama **EDITAR CRITERIOS**. Por ejemplo: vencimiento ascendente y, para fechas iguales, serial descendente. Al retirar todos, se conserva el orden de carga hasta agregar otro criterio.
+
+Con **Fecha de vencimiento ↑** como primer criterio aparecen los vencidos primero, después los de vencimiento próximo y por último los más lejanos. Las fechas ausentes o inválidas quedan al final en ambos sentidos. Los seriales se ordenan numéricamente. Excel y PDF conservan los criterios, el sentido individual de cada uno y el orden visible.
 
 En **Buscar y filtrar**, el selector de tipo de fecha permite mostrar solo ingresos, traslados o vencimientos de un día concreto; el día es opcional y puede limpiarse. Este filtro limita los resultados, mientras que los criterios solo cambian su posición. Para precintos se usa la fecha de la novedad.
 
