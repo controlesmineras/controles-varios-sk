@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getLocal } from "@/lib/offline-store";
 import { useRevista } from "@/lib/use-revista";
-import { compareInventory, type OrderDirection } from "@/lib/inventory-order";
+import { compareInventory, inventoryDateFor, inventoryOrderLabels, inventoryOrderOptions, transferDate, type InventoryDateField, type InventoryOrder, type OrderDirection } from "@/lib/inventory-order";
 import { RecordDialog } from "@/components/record-dialog";
 import { AccessDialog } from "@/components/access-dialog";
 import { MovementDialog } from "@/components/movement-dialog";
@@ -62,9 +62,6 @@ function MaterialIcon({name}:{name:string}){
   return <svg viewBox="0 0 60 44" className="h-8 w-10" aria-hidden="true"><g transform="rotate(-24 30 22)"><g fill="#f97316" stroke="#fef9c3" strokeWidth=".75" strokeLinejoin="round"><path d="m9 17-8-5 4.5 6L0 21l9 1-4-2.7Z"/><path d="m13 14-5-11 6.5 7L15 0l3 14-2.5-6Z"/><path d="m23 13-1-11 4 7 4-9-2 14-2-7Z"/><path d="m35 14 4-12 1 8 7-7-6 12-.5-7Z"/><path d="m48 16 8-8-4 8 8-2-10 6 5-5Z"/><path d="m51 22 9-1-7 4 6 5-10-4 5-1.5Z"/><path d="m46 29 10 8-8-4 3 9-8-12 5 4Z"/><path d="m36 30 5 13-5-8-2 9-2-14 4 6Z"/><path d="m25 30-1 13-3-8-5 8 4-14 2 7Z"/><path d="m15 28-7 12 3-9-9 6 10-10-6 3Z"/><path d="m9 24-9 4 6-5-6-3 10 .5-5 2.5Z"/></g><g fill="#facc15" stroke="#fef9c3" strokeWidth=".7" strokeLinejoin="round"><path d="m11 19-7-2 5 4-6 2 8 .5-4-2.3Z"/><path d="m19 14-2-8 4 6 2-8-.5 10-2-5Z"/><path d="m30 13 2-9 1 7 5-7-4 10-1-5Z"/><path d="m42 15 6-8-3 8 7-4-8 7 3-4Z"/><path d="m50 19 8-3-6 5 7 1-9 2 4-3Z"/><path d="m42 28 7 8-5-5 1 8-5-10 4 4Z"/><path d="m30 30 2 9-4-6-2 8 1-11 2.5 5Z"/><path d="m19 29-4 9 1-7-7 6 7-9-4 3Z"/></g><path d="M11 18.5h38c1.8 0 2.7 1.6 2.7 3.5s-.9 3.5-2.7 3.5H11c-1.7 0-2.7-1.6-2.7-3.5s1-3.5 2.7-3.5Z" fill="#d1d5db" stroke="currentColor" strokeWidth="1"/><path d="M11.5 20h32" fill="none" stroke="#fff" strokeWidth="1" strokeLinecap="round" opacity=".9"/><path d="M12 24h31" fill="none" stroke="#9ca3af" strokeWidth=".7" strokeLinecap="round"/><path d="M42.5 18.7c-1 2.2-1 4.4 0 6.6m2.4-6.6c-1 2.2-1 4.4 0 6.6m2.4-6.5c-.9 2.1-.9 4.3 0 6.4" fill="none" stroke="#6b7280" strokeWidth="1.15"/></g></svg>;
 }
 
-function transferDate(record:Record<string,unknown>){const movements=Array.isArray(record.movimientos)?record.movimientos as Array<Record<string,unknown>>:[];return movements.filter(m=>m.destino==="Polvorín interior de mina"&&m.fecha).map(m=>String(m.fecha)).sort().at(-1)||"";}
-function inventoryDate(record:Record<string,unknown>,location:string){return location==="Polvorín interior de mina"?transferDate(record):String(record.fechaIngreso||record.fecha||"");}
-
 export default function Home() {
   const [authenticated, setAuthenticated] = useState(false);
   const [currentUser, setCurrentUser] = useState<{ usuario: string; nombre: string; rol: string; protegido?: boolean } | null>(null);
@@ -77,10 +74,9 @@ export default function Home() {
   const revistaActive = revista.active;
   useEffect(() => { setRevistaFilter("TODOS"); }, [authenticated, currentUser?.usuario]);
   const [dateFilter,setDateFilter]=useState("");
-  const [entryFilter,setEntryFilter]=useState("");
-  const [showEntryFilter,setShowEntryFilter]=useState(false);
+  const [dateFilterField,setDateFilterField]=useState<InventoryDateField>("TRASLADO");
   const [exporting,setExporting]=useState(false);
-  const [inventoryOrder,setInventoryOrder]=useState<Array<"FECHA"|"SERIAL">>(["FECHA"]);
+  const [inventoryOrder,setInventoryOrder]=useState<InventoryOrder[]>(["TRASLADO"]);
   const [orderDirection,setOrderDirection]=useState<OrderDirection>("ASC");
   const [verificationFilter,setVerificationFilter]=useState("TODOS");
   const [verificationSignal,setVerificationSignal]=useState(0);
@@ -179,8 +175,8 @@ export default function Home() {
   const selectedLocationLabel = selectedLocation === "all" ? "Todos los lugares" : selectedLocation === "interior" ? "Polvorín" : "Almacén";
   const selectedLocationValue = selectedLocation === "interior" ? "Polvorín interior de mina" : "Polvorín superficie";
   const selectedRecords = useMemo(
-    () => (records[selected] || []).filter(record => selected === "SELLOS" || selectedLocation === "all" || record.ubicacion === selectedLocationValue).filter((record) => JSON.stringify(record).toLowerCase().includes(query.toLowerCase())).filter(record=>!dateFilter||(selected==="SELLOS"?String(record.fecha||""):inventoryDate(record,selectedLocationValue)).slice(0,10)===dateFilter).filter(record=>!entryFilter||String(record.fechaIngreso||"").slice(0,10)===entryFilter).filter(record=>verificationFilter==="TODOS"||(verificationFilter==="VERIFICADOS"?record.verificado!==false:record.verificado===false)).sort((a,b)=>selected==="SELLOS"?0:compareInventory(a,b,inventoryOrder,orderDirection,record=>inventoryDate(record,selectedLocationValue))),
-    [records, selected, selectedLocation, selectedLocationValue, query,dateFilter,entryFilter,verificationFilter,inventoryOrder,orderDirection],
+    () => (records[selected] || []).filter(record => selected === "SELLOS" || selectedLocation === "all" || record.ubicacion === selectedLocationValue).filter((record) => JSON.stringify(record).toLowerCase().includes(query.toLowerCase())).filter(record=>!dateFilter||(selected==="SELLOS"?String(record.fecha||""):inventoryDateFor(record,dateFilterField)).slice(0,10)===dateFilter).filter(record=>verificationFilter==="TODOS"||(verificationFilter==="VERIFICADOS"?record.verificado!==false:record.verificado===false)).sort((a,b)=>selected==="SELLOS"?0:compareInventory(a,b,inventoryOrder,orderDirection)),
+    [records, selected, selectedLocation, selectedLocationValue, query,dateFilter,dateFilterField,verificationFilter,inventoryOrder,orderDirection],
   );
   const visibleRecords = selected === "SELLOS" || !revistaActive ? selectedRecords : selectedRecords.filter(record => revistaFilter === "TODOS" || (revistaFilter === "MARCADOS" ? revista.checked(selected, record) : !revista.checked(selected, record)));
   const checkedCount = selectedRecords.filter(record => revista.checked(selected, record)).length;
@@ -188,14 +184,14 @@ export default function Home() {
     const headers=["Serial / caja","Ubicación","Fecha de ingreso","Fecha de traslado al polvorín","Fabricación","Vencimiento","Lote / contenido","Verificación de entrada","Fecha de revista","Check de revista"];
     const rows=visibleRecords.map(r=>[String(r.serial||r.cajaNumero||r.id),String(r.ubicacion||""),String(r.fechaIngreso||""),transferDate(r).slice(0,10),String(r.fechaFabricacion||r.fechaProduccion||""),String(r.fechaVencimiento||""),String(r.loteProduccion||r.contenido||""),r.verificado===false?"Pendiente":"Verificado",revista.date,revista.checked(selected,r)?"✓":""]);
     const title=selected+" · "+selectedLocationLabel, filename="Explosivos_"+selected.replaceAll(" ","_")+"_"+selectedLocationLabel+"_Revista_"+revista.date;
-    const detail=[rows.length+" registros","Orden: "+inventoryOrder.map(order=>order==="FECHA"?(selectedLocation==="interior"?"Fecha de traslado":"Fecha de ingreso"):"Serial").join(" → ")+(orderDirection==="ASC"?" ascendente":" descendente"),query?"Búsqueda: "+query:"",dateFilter?"Fecha en ubicación: "+dateFilter:"",entryFilter?"Ingreso: "+entryFilter:"","Verificación de entrada: "+verificationFilter,"Revista: "+revista.date,"Responsable: "+(currentUser?.nombre||currentUser?.usuario||""),"Revista: "+(revistaActive?revistaFilter:"TODOS"),"Check = encontrado; vacío = sin marcar","Marcas guardadas en este dispositivo"].filter(Boolean).join(" · ");
+    const detail=[rows.length+" registros","Orden: "+inventoryOrder.map(order=>inventoryOrderLabels[order]).join(" → ")+(orderDirection==="ASC"?" ascendente":" descendente"),query?"Búsqueda: "+query:"",dateFilter?inventoryOrderLabels[dateFilterField]+" exacta: "+dateFilter:"","Verificación de entrada: "+verificationFilter,"Revista: "+revista.date,"Responsable: "+(currentUser?.nombre||currentUser?.usuario||""),"Revista: "+(revistaActive?revistaFilter:"TODOS"),"Check = encontrado; vacío = sin marcar","Marcas guardadas en este dispositivo"].filter(Boolean).join(" · ");
     if(format==="excel"){const XLSX=await import("xlsx");const sheet=XLSX.utils.aoa_to_sheet([[title],[detail],[],headers,...rows]);sheet["!cols"]=headers.map((h,i)=>({wch:Math.min(45,Math.max(h.length,...rows.map(row=>row[i].length))+2)}));const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,"Inventario");XLSX.writeFile(book,filename+".xlsx");}
     else {const [{jsPDF},{default:autoTable}]=await Promise.all([import("jspdf"),import("jspdf-autotable")]);const doc=new jsPDF({orientation:"landscape"});doc.setFontSize(14);doc.text(title,14,16);doc.setFontSize(9);const lines=doc.splitTextToSize(detail,268);doc.text(lines,14,23);autoTable(doc,{head:[headers],body:rows.map(row=>row.map((cell,index)=>index===9?(cell?"X":""):cell)),startY:28+lines.length*4,styles:{fontSize:7,cellPadding:2},headStyles:{fillColor:[13,44,62]},margin:{bottom:15},didDrawPage:()=>{doc.setFontSize(8);doc.text("CONTROL EXPLOSIVOS SK · Página "+doc.getNumberOfPages(),14,doc.internal.pageSize.getHeight()-7);}});doc.save(filename+".pdf");}
   }catch(cause){window.alert(cause instanceof Error?cause.message:"No se pudo exportar.");}finally{setExporting(false);}}
   const historySection = useRef<HTMLElement>(null);
   function openSealHistory() {
     setSelected("SELLOS");
-    setQuery(""); setDateFilter(""); setEntryFilter("");
+    setQuery(""); setDateFilter("");
     setVerificationFilter("TODOS"); setRevistaFilter("TODOS");
     requestAnimationFrame(() => {
       historySection.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -294,7 +290,7 @@ export default function Home() {
               <div><h2 className="text-lg font-semibold">{selected === "SELLOS" ? "REGISTROS DE NOVEDADES DE PRECINTOS" : selected}</h2><p className="text-sm text-slate-500">{selected === "SELLOS" ? "Registros disponibles" : `Registros en ${selectedLocationLabel}`}</p></div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">{visibleRecords.length} registros</span>
             </div>
-            {selected!=="SELLOS"&&<div className="flex flex-wrap items-center gap-2 border-b px-5 py-3"><Button type="button" variant="outline" size="sm" disabled={exporting||!visibleRecords.length||!revista.ready||revista.saving||revista.dirty} title={revista.dirty?"Finaliza la revista para exportar las marcas guardadas":undefined} onClick={()=>void exportInventory("excel")}>EXPORTAR EXCEL</Button><Button type="button" variant={revistaActive?"default":"outline"} size="sm" aria-pressed={revistaActive} disabled={revista.saving||!revista.ready} onClick={async()=>{if(revistaActive){if(await revista.finish())setRevistaFilter("TODOS");}else{revista.begin();setRevistaFilter("TODOS");}}}>{revista.saving?"GUARDANDO…":revistaActive?"FINALIZAR REVISTA":"PASAR REVISTA"}</Button>{revistaActive&&<Button type="button" variant="outline" size="sm" disabled={revista.saving} onClick={()=>{revista.cancel();setRevistaFilter("TODOS");}}>CANCELAR REVISTA</Button>}<Button type="button" variant="outline" size="sm" disabled={exporting||!visibleRecords.length||!revista.ready||revista.saving||revista.dirty} title={revista.dirty?"Finaliza la revista para exportar las marcas guardadas":undefined} onClick={()=>void exportInventory("pdf")}>EXPORTAR PDF</Button><Button type="button" variant={showEntryFilter?"default":"outline"} size="sm" onClick={()=>setShowEntryFilter(v=>!v)}>FILTRAR POR FECHA DE INGRESO</Button>{showEntryFilter&&<label className="flex items-center gap-2 text-xs font-semibold">FECHA DE INGRESO<Input type="date" value={entryFilter} onChange={e=>setEntryFilter(e.target.value)} className="w-auto"/>{entryFilter&&<Button type="button" variant="ghost" size="sm" onClick={()=>setEntryFilter("")}>LIMPIAR</Button>}</label>}</div>}
+            {selected!=="SELLOS"&&<div className="flex flex-wrap items-center gap-2 border-b px-5 py-3"><Button type="button" variant="outline" size="sm" disabled={exporting||!visibleRecords.length||!revista.ready||revista.saving||revista.dirty} title={revista.dirty?"Finaliza la revista para exportar las marcas guardadas":undefined} onClick={()=>void exportInventory("excel")}>EXPORTAR EXCEL</Button><Button type="button" variant={revistaActive?"default":"outline"} size="sm" aria-pressed={revistaActive} disabled={revista.saving||!revista.ready} onClick={async()=>{if(revistaActive){if(await revista.finish())setRevistaFilter("TODOS");}else{revista.begin();setRevistaFilter("TODOS");}}}>{revista.saving?"GUARDANDO…":revistaActive?"FINALIZAR REVISTA":"PASAR REVISTA"}</Button>{revistaActive&&<Button type="button" variant="outline" size="sm" disabled={revista.saving} onClick={()=>{revista.cancel();setRevistaFilter("TODOS");}}>CANCELAR REVISTA</Button>}<Button type="button" variant="outline" size="sm" disabled={exporting||!visibleRecords.length||!revista.ready||revista.saving||revista.dirty} title={revista.dirty?"Finaliza la revista para exportar las marcas guardadas":undefined} onClick={()=>void exportInventory("pdf")}>EXPORTAR PDF</Button></div>}
             {selected !== "SELLOS" && revistaActive && <div className="border-b border-amber-200 bg-amber-50/60 px-5 py-4">
               <div className="flex flex-wrap items-end gap-3">
                 <label className="grid gap-1 text-sm font-semibold text-[#0d2c3e]">FECHA DE REVISTA<Input type="date" value={revista.date} disabled={revista.saving||revista.dirty} onChange={event => { revista.setDate(event.target.value); setRevistaFilter("TODOS"); }} className="w-auto bg-white" /></label>
@@ -304,7 +300,20 @@ export default function Home() {
               <p className="mt-2 text-sm text-slate-600">Marca lo que encuentres. FINALIZAR REVISTA guarda los cambios por fecha en este dispositivo; CANCELAR REVISTA descarta el borrador y conserva las marcas anteriores. {revista.dirty&&"Hay cambios sin guardar. Finaliza o cancela antes de cambiar la fecha o exportar."}</p>
               {revista.error && <p role="alert" className="mt-2 text-sm font-medium text-red-700">{revista.error}</p>}
             </div>}
-            {selected!=="SELLOS"&&<div className="flex flex-wrap items-end gap-3 border-b px-5 py-3"><Button type="button" variant="outline" size="sm" aria-pressed={orderDirection==="DESC"} title={orderDirection==="ASC"?"Cambiar a orden descendente":"Cambiar a orden ascendente"} onClick={()=>setOrderDirection(current=>current==="ASC"?"DESC":"ASC")}>{orderDirection==="ASC"?"↑ ORDEN ASCENDENTE":"↓ ORDEN DESCENDENTE"}</Button>{inventoryOrder.map((order,index)=><label key={index} className="grid gap-1 text-xs font-semibold text-slate-600">{index===0?"PRIMER CRITERIO":"LUEGO POR"}<select aria-label={index===0?"Primer criterio de orden":"Segundo criterio de orden"} value={order} className="h-9 rounded-md border bg-white px-3 text-sm" onChange={e=>{const value=e.target.value as "FECHA"|"SERIAL";setInventoryOrder(current=>current.length===1?[value]:index===0?[value,value==="FECHA"?"SERIAL":"FECHA"]:[value==="FECHA"?"SERIAL":"FECHA",value]);}}><option value="FECHA">{selectedLocation==="interior"?"FECHA DE TRASLADO":"FECHA DE INGRESO"}</option><option value="SERIAL">SERIAL</option></select></label>)}{inventoryOrder.length===1?<Button type="button" variant="outline" size="sm" onClick={()=>setInventoryOrder(current=>[...current,current[0]==="FECHA"?"SERIAL":"FECHA"])}>+ AGREGAR FILTRO</Button>:<Button type="button" variant="ghost" size="sm" onClick={()=>setInventoryOrder(current=>[current[0]])}>QUITAR SEGUNDO CRITERIO</Button>}</div>}
+            {selected!=="SELLOS"&&<div className="border-b px-5 py-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <Button type="button" variant="outline" size="sm" aria-pressed={orderDirection==="DESC"} title={orderDirection==="ASC"?"Cambiar a orden descendente":"Cambiar a orden ascendente"} onClick={()=>setOrderDirection(current=>current==="ASC"?"DESC":"ASC")}>{orderDirection==="ASC"?"↑ ORDEN ASCENDENTE":"↓ ORDEN DESCENDENTE"}</Button>
+                {inventoryOrder.map((order,index)=><label key={index} className="grid gap-1 text-xs font-semibold text-slate-600">{index===0?"PRIMER CRITERIO":"LUEGO POR"}
+                  <select aria-label={index===0?"Primer criterio de orden":"Segundo criterio de orden"} value={order} className="h-9 rounded-md border bg-white px-3 text-sm" onChange={e=>{
+                    const value=e.target.value as InventoryOrder;
+                    setInventoryOrder(current=>{const duplicate=current.indexOf(value);return current.map((criterion,i)=>i===index?value:i===duplicate?current[index]:criterion);});
+                    if(index===0&&value==="VENCIMIENTO")setOrderDirection("ASC");
+                  }}>{inventoryOrderOptions.map(value=><option key={value} value={value}>{inventoryOrderLabels[value].toUpperCase()}</option>)}</select>
+                </label>)}
+                {inventoryOrder.length===1?<Button type="button" variant="outline" size="sm" onClick={()=>setInventoryOrder(current=>[...current,current[0]==="SERIAL"?"INGRESO":"SERIAL"])}>+ AGREGAR CRITERIO</Button>:<Button type="button" variant="ghost" size="sm" onClick={()=>setInventoryOrder(current=>[current[0]])}>QUITAR SEGUNDO CRITERIO</Button>}
+              </div>
+              {inventoryOrder[0]==="VENCIMIENTO"&&<p className="mt-2 text-xs text-slate-600">{orderDirection==="ASC"?"Primero los vencidos, luego los próximos a vencer y al final los de vencimiento más lejano.":"Primero los de vencimiento más lejano, luego los próximos a vencer y al final los vencidos."} Los registros sin fecha válida quedan al final de la lista.</p>}
+            </div>}
             <div role="search" aria-label="Buscar en el material seleccionado" className="min-w-0 border-b border-slate-200 bg-slate-50/70 px-4 py-3 sm:px-5">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">Buscar y filtrar</span>
@@ -314,30 +323,37 @@ export default function Home() {
                     <DialogHeader><DialogTitle>BUSCAR Y FILTRAR INVENTARIO</DialogTitle></DialogHeader>
                     <div className="space-y-3 text-sm text-slate-700">
                       <p><b>Buscar:</b> encuentra registros por serial, número de caja o lote.</p>
-                      <p><b>Fecha:</b> muestra los traslados de ese día en Polvorín y los ingresos de ese día en Almacén. Si queda vacía, muestra todas las fechas.</p>
+                      <p><b>Orden:</b> organiza los registros por ingreso, traslado, vencimiento o serial, sin ocultarlos. El segundo criterio resuelve los empates del primero.</p><p><b>Fecha exacta:</b> elige si deseas filtrar por ingreso, traslado o vencimiento y selecciona el día. Si queda vacía, muestra todas las fechas. En precintos filtra la fecha de la novedad.</p>
                       <p><b>Todos / Verificados / Pendientes:</b> muestra todos los registros o solo los que ya fueron verificados o están pendientes de verificación de ingreso.</p>
-                      <p>Los filtros se aplican al material y al lugar seleccionados en las tarjetas de arriba: TODOS, Polvorín o Almacén. TODOS reúne los registros de ambos lugares; la fecha general corresponde al ingreso.</p>
+                      <p>Los filtros se aplican al material y al lugar seleccionados en las tarjetas de arriba: TODOS, Polvorín o Almacén. TODOS reúne los registros de ambos lugares.</p>
                     </div>
                   </DialogContent>
                 </Dialog>
               </div>
-              <div className="grid min-w-0 grid-cols-2 items-end gap-2 md:grid-cols-[minmax(0,1fr)_12rem_12rem]">
-                <label className="col-span-2 grid min-w-0 gap-1 text-xs font-semibold text-slate-600 md:col-span-1">
+              <div className={`grid min-w-0 grid-cols-2 items-end gap-2 ${selected==="SELLOS"?"md:grid-cols-[minmax(0,1fr)_12rem_12rem]":"lg:grid-cols-[minmax(0,1fr)_11rem_11rem_12rem]"}`}>
+                <label className={`col-span-2 grid min-w-0 gap-1 text-xs font-semibold text-slate-600 ${selected==="SELLOS"?"md:col-span-1":"lg:col-span-1"}`}>
                   BUSCAR SERIAL, CAJA O LOTE
                   <span className="relative block min-w-0">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
                     <Input aria-label="Buscar registros" value={query} onChange={(event) => setQuery(event.target.value)} className="h-11 min-w-0 bg-white pl-10 text-base font-normal" placeholder="Buscar serial, caja o lote" />
                   </span>
                 </label>
-                <label className="grid min-w-0 gap-1 text-xs font-semibold text-slate-600">
-                  {selectedLocation === "interior" ? "FECHA DE TRASLADO" : "FECHA DE INGRESO"}
-                  <Input type="date" value={dateFilter} onChange={event => setDateFilter(event.target.value)} aria-label={selectedLocation === "interior" ? "Filtrar por fecha de traslado" : "Filtrar por fecha de ingreso"} className="h-11 w-full min-w-0 max-w-full bg-white px-2 text-base font-normal" />
-                </label>
-                <label className="grid min-w-0 gap-1 text-xs font-semibold text-slate-600">
+                {selected!=="SELLOS"&&<label className="grid min-w-0 gap-1 text-xs font-semibold text-slate-600">
+                  FILTRAR POR FECHA DE
+                  <select aria-label="Tipo de fecha para filtrar" value={dateFilterField} onChange={event=>{setDateFilterField(event.target.value as InventoryDateField);setDateFilter("");}} className="h-11 w-full min-w-0 rounded-md border bg-white px-2 text-base font-normal">
+                    <option value="INGRESO">INGRESO</option><option value="TRASLADO">TRASLADO</option><option value="VENCIMIENTO">VENCIMIENTO</option>
+                  </select>
+                </label>}
+                <div className="grid min-w-0 gap-1 text-xs font-semibold text-slate-600">
+                  <label htmlFor="inventory-exact-date">{selected==="SELLOS"?"FECHA DE LA NOVEDAD":"FECHA EXACTA (OPCIONAL)"}</label>
+                  <Input id="inventory-exact-date" type="date" value={dateFilter} onChange={event => setDateFilter(event.target.value)} aria-label={selected==="SELLOS"?"Filtrar por fecha de la novedad":`Filtrar por ${inventoryOrderLabels[dateFilterField].toLowerCase()}`} className="h-11 w-full min-w-0 max-w-full bg-white px-2 text-base font-normal" />
+                </div>
+                <label className={`${selected!=="SELLOS"?"col-span-2 lg:col-span-1 ":""}grid min-w-0 gap-1 text-xs font-semibold text-slate-600`}>
                   VERIFICACIÓN DE INGRESO
                   <select aria-label="Verificación de ingreso" value={verificationFilter} onChange={event => setVerificationFilter(event.target.value)} className="h-11 w-full min-w-0 rounded-md border bg-white px-2 text-base font-normal"><option value="TODOS">TODOS</option><option value="VERIFICADOS">VERIFICADOS</option><option value="PENDIENTES">PENDIENTES</option></select>
                 </label>
               </div>
+              {dateFilter&&<Button type="button" variant="ghost" size="sm" onClick={()=>setDateFilter("")} className="mt-2">LIMPIAR FILTRO DE FECHA</Button>}
             </div>
             {selected === "SELLOS" ? <SealHistory records={selectedRecords}/> : visibleRecords.length === 0 ? <div className="grid min-h-56 place-items-center px-6 py-10 text-center">
               <div><Archive className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-3 font-medium">No hay registros de {selected === "SELLOS" ? "PRECINTOS" : `${selected} en ${selectedLocationLabel}`}</p><p className="mt-1 text-sm text-slate-500">{selected === "SELLOS" ? "Los precintos registrados aparecerán aquí." : revistaActive && revistaFilter === "SIN_MARCAR" ? "No quedan registros sin check entre los que coinciden con los filtros actuales." : "Se muestran los elementos que están actualmente en este lugar y coinciden con los filtros."}</p></div>

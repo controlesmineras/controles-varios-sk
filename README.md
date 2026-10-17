@@ -12,7 +12,11 @@ Consulte `apps-script/README.md` para conectar el backend antes de utilizar la a
 
 ## Orden del inventario
 
-El botón **ORDEN ASCENDENTE / ORDEN DESCENDENTE** alterna la dirección de los criterios seleccionados (fecha y/o serial). Los seriales se ordenan numéricamente y los valores sin fecha quedan al final en ambos sentidos. Excel y PDF respetan el orden visible.
+El botón **ORDEN ASCENDENTE / ORDEN DESCENDENTE** alterna la dirección de los criterios seleccionados (fecha de ingreso, fecha de traslado, fecha de vencimiento o serial). El segundo criterio resuelve los empates del primero; **AGREGAR CRITERIO** permite combinar dos criterios distintos. Los seriales se ordenan numéricamente y los valores sin fecha válida quedan al final en ambos sentidos.
+
+Al elegir **Fecha de vencimiento** como primer criterio se activa el orden ascendente: vencidos primero, después los de vencimiento próximo y por último los más lejanos. Puede invertirse con el mismo botón de orden. Excel y PDF respetan los criterios y el orden visible.
+
+En **Buscar y filtrar**, el selector de tipo de fecha permite mostrar solo ingresos, traslados o vencimientos de un día concreto; el día es opcional y puede limpiarse. Este filtro limita los resultados, mientras que los criterios solo cambian su posición. Para precintos se usa la fecha de la novedad.
 
 ## Revista por fecha
 
