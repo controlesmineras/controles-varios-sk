@@ -1,7 +1,7 @@
 "use client";
 
 import {SealHistory} from "@/components/seal-history";
-import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
+import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, Archive, Check, Info, Loader2, LogOut, MapPin, RefreshCw, Search, ShieldCheck, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
@@ -9,12 +9,13 @@ import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { getLocal } from "@/lib/offline-store";
 import { useRevista } from "@/lib/use-revista";
+import { compareInventory, type OrderDirection } from "@/lib/inventory-order";
 import { RecordDialog } from "@/components/record-dialog";
 import { AccessDialog } from "@/components/access-dialog";
 import { MovementDialog } from "@/components/movement-dialog";
 import { VerificationDialog } from "@/components/verification-dialog";
 import { InstallAppButton } from "@/components/install-app-button";
-import { backendConfigured, createInitialAdmin, deleteRecord, getStatus, listRecords, login, logout, pendingOperations, synchronize } from "@/lib/backend";
+import { backendConfigured, createInitialAdmin, deleteRecord, getStatus, listRecords, login, logout, pendingOperations, synchronize, isTransientSyncError } from "@/lib/backend";
 
 const modules = [
   { name: "INDUGEL", tone: "green" },
@@ -73,13 +74,14 @@ export default function Home() {
   const [checking, setChecking] = useState(true);
   const [selected, setSelected] = useState("INDUGEL");
   const [query, setQuery] = useState("");
-  const [revistaActive, setRevistaActive] = useState(false);
-  useEffect(() => { setRevistaActive(false); setRevistaFilter("TODOS"); }, [authenticated, currentUser?.usuario]);
+  const revistaActive = revista.active;
+  useEffect(() => { setRevistaFilter("TODOS"); }, [authenticated, currentUser?.usuario]);
   const [dateFilter,setDateFilter]=useState("");
   const [entryFilter,setEntryFilter]=useState("");
   const [showEntryFilter,setShowEntryFilter]=useState(false);
   const [exporting,setExporting]=useState(false);
   const [inventoryOrder,setInventoryOrder]=useState<Array<"FECHA"|"SERIAL">>(["FECHA"]);
+  const [orderDirection,setOrderDirection]=useState<OrderDirection>("ASC");
   const [verificationFilter,setVerificationFilter]=useState("TODOS");
   const [verificationSignal,setVerificationSignal]=useState(0);
   const [materialViews,setMaterialViews]=useState<Record<string,number>>({});
@@ -90,23 +92,54 @@ export default function Home() {
   const [syncIssues,setSyncIssues]=useState<Array<{id:string;label:string;message:string}>>([]);
   const [pendingSync,setPendingSync]=useState(0);
   const [records, setRecords] = useState<Record<string, Array<Record<string, unknown>>>>({});
+  const [retryDelay,setRetryDelay]=useState(0);
+  const retryCount=useRef(0), loadingRecords=useRef(false);
   const loadRecords = useCallback(async () => {
-    setSyncState("syncing");setSyncError("");setSyncIssues([]);
-    const showSavedSync=async()=>{const stamp=await getLocal<string>("lastSync","");if(stamp)setLastSync(new Date(stamp).toLocaleString("es-CO",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}));};
+    if(loadingRecords.current)return false;
+    const sessionToken=localStorage.getItem("control_explosivos_token");
+    if(!sessionToken)return false;
+    const current=()=>localStorage.getItem("control_explosivos_token")===sessionToken;
+    loadingRecords.current=true;
+    setRetryDelay(0);setSyncState("syncing");setSyncError("");setSyncIssues([]);
+    const showSavedSync=async()=>{const stamp=await getLocal<string>("lastSync","");if(stamp&&current())setLastSync(new Date(stamp).toLocaleString("es-CO",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}));};
     try {
-      setRecords(await listRecords());setPendingSync(await pendingOperations());await showSavedSync();
+      const cached=await listRecords(),pending=await pendingOperations();
+      if(!current())return false;
+      setRecords(cached);setPendingSync(pending);await showSavedSync();
       if(!navigator.onLine){setSyncState("idle");setSyncError("Sin conexión. Los pendientes siguen guardados en este dispositivo.");return false;}
       const result=await synchronize();
+      if(!current())return false;
       setRecords(result.records);setPendingSync(result.pending);setSyncIssues(result.issues);await showSavedSync();
+      retryCount.current=0;
       setSyncState(result.pending?"error":"success");
-      if(result.pending)setSyncError(`${result.pending} operación(es) pendiente(s). ${result.issues.length?"Revisa los motivos indicados abajo.":"Hay cambios nuevos por enviar; pulsa SINCRONIZAR otra vez."}`);
+      if(result.pending){
+        setSyncError(`${result.pending} operación(es) pendiente(s). ${result.issues.length?"Revisa los motivos indicados abajo.":"Se enviarán automáticamente los cambios nuevos."}`);
+        if(!result.issues.length)setRetryDelay(1000);
+      }
       return result.pending===0;
     } catch(cause) {
+      if(!current())return false;
       setSyncError(cause instanceof Error?cause.message:"No se pudo sincronizar. Los pendientes se conservan.");setSyncState("error");
-      try{setRecords(await listRecords());setPendingSync(await pendingOperations());await showSavedSync();}catch{}
+      try{
+        const cached=await listRecords(),pending=await pendingOperations();
+        if(!current())return false;
+        setRecords(cached);setPendingSync(pending);await showSavedSync();
+        if(pending&&isTransientSyncError(cause))setRetryDelay(Math.min(60000,5000*2**Math.min(retryCount.current++,4)));
+      }catch{}
       return false;
-    }
+    } finally { loadingRecords.current=false; }
   }, []);
+  useEffect(()=>{
+    if(!authenticated){setRetryDelay(0);retryCount.current=0;return;}
+    if(!retryDelay)return;
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    const schedule=()=>{
+      clearTimeout(timer);
+      if(document.visibilityState==="visible"&&navigator.onLine)timer=setTimeout(()=>void loadRecords(),retryDelay);
+    };
+    schedule();document.addEventListener("visibilitychange",schedule);
+    return()=>{clearTimeout(timer);document.removeEventListener("visibilitychange",schedule);};
+  },[authenticated,retryDelay,loadRecords]);
   useEffect(()=>{
     const progress=()=>{void pendingOperations().then(setPendingSync);};
     window.addEventListener("explosivos-sync-progress",progress);
@@ -146,8 +179,8 @@ export default function Home() {
   const selectedLocationLabel = selectedLocation === "all" ? "Todos los lugares" : selectedLocation === "interior" ? "Polvorín" : "Almacén";
   const selectedLocationValue = selectedLocation === "interior" ? "Polvorín interior de mina" : "Polvorín superficie";
   const selectedRecords = useMemo(
-    () => (records[selected] || []).filter(record => selected === "SELLOS" || selectedLocation === "all" || record.ubicacion === selectedLocationValue).filter((record) => JSON.stringify(record).toLowerCase().includes(query.toLowerCase())).filter(record=>!dateFilter||(selected==="SELLOS"?String(record.fecha||""):inventoryDate(record,selectedLocationValue)).slice(0,10)===dateFilter).filter(record=>!entryFilter||String(record.fechaIngreso||"").slice(0,10)===entryFilter).filter(record=>verificationFilter==="TODOS"||(verificationFilter==="VERIFICADOS"?record.verificado!==false:record.verificado===false)).sort((a,b)=>{if(selected==="SELLOS")return 0;for(const order of inventoryOrder){let difference=0;if(order==="SERIAL")difference=String(a.serial||a.cajaNumero||"").localeCompare(String(b.serial||b.cajaNumero||""),"es",{numeric:true});else{const da=inventoryDate(a,selectedLocationValue).slice(0,10),db=inventoryDate(b,selectedLocationValue).slice(0,10);difference=da&&db?da.localeCompare(db):da?-1:db?1:0;}if(difference)return difference;}return 0;}),
-    [records, selected, selectedLocation, selectedLocationValue, query,dateFilter,entryFilter,verificationFilter,inventoryOrder],
+    () => (records[selected] || []).filter(record => selected === "SELLOS" || selectedLocation === "all" || record.ubicacion === selectedLocationValue).filter((record) => JSON.stringify(record).toLowerCase().includes(query.toLowerCase())).filter(record=>!dateFilter||(selected==="SELLOS"?String(record.fecha||""):inventoryDate(record,selectedLocationValue)).slice(0,10)===dateFilter).filter(record=>!entryFilter||String(record.fechaIngreso||"").slice(0,10)===entryFilter).filter(record=>verificationFilter==="TODOS"||(verificationFilter==="VERIFICADOS"?record.verificado!==false:record.verificado===false)).sort((a,b)=>selected==="SELLOS"?0:compareInventory(a,b,inventoryOrder,orderDirection,record=>inventoryDate(record,selectedLocationValue))),
+    [records, selected, selectedLocation, selectedLocationValue, query,dateFilter,entryFilter,verificationFilter,inventoryOrder,orderDirection],
   );
   const visibleRecords = selected === "SELLOS" || !revistaActive ? selectedRecords : selectedRecords.filter(record => revistaFilter === "TODOS" || (revistaFilter === "MARCADOS" ? revista.checked(selected, record) : !revista.checked(selected, record)));
   const checkedCount = selectedRecords.filter(record => revista.checked(selected, record)).length;
@@ -155,7 +188,7 @@ export default function Home() {
     const headers=["Serial / caja","Ubicación","Fecha de ingreso","Fecha de traslado al polvorín","Fabricación","Vencimiento","Lote / contenido","Verificación de entrada","Fecha de revista","Check de revista"];
     const rows=visibleRecords.map(r=>[String(r.serial||r.cajaNumero||r.id),String(r.ubicacion||""),String(r.fechaIngreso||""),transferDate(r).slice(0,10),String(r.fechaFabricacion||r.fechaProduccion||""),String(r.fechaVencimiento||""),String(r.loteProduccion||r.contenido||""),r.verificado===false?"Pendiente":"Verificado",revista.date,revista.checked(selected,r)?"✓":""]);
     const title=selected+" · "+selectedLocationLabel, filename="Explosivos_"+selected.replaceAll(" ","_")+"_"+selectedLocationLabel+"_Revista_"+revista.date;
-    const detail=[rows.length+" registros","Orden: "+inventoryOrder.map(order=>order==="FECHA"?(selectedLocation==="interior"?"Fecha de traslado":"Fecha de ingreso"):"Serial").join(" → ")+" ascendente",query?"Búsqueda: "+query:"",dateFilter?"Fecha en ubicación: "+dateFilter:"",entryFilter?"Ingreso: "+entryFilter:"","Verificación de entrada: "+verificationFilter,"Revista: "+revista.date,"Responsable: "+(currentUser?.nombre||currentUser?.usuario||""),"Revista: "+revistaFilter,"Check = encontrado; vacío = sin marcar","Marcas guardadas en este dispositivo"].filter(Boolean).join(" · ");
+    const detail=[rows.length+" registros","Orden: "+inventoryOrder.map(order=>order==="FECHA"?(selectedLocation==="interior"?"Fecha de traslado":"Fecha de ingreso"):"Serial").join(" → ")+(orderDirection==="ASC"?" ascendente":" descendente"),query?"Búsqueda: "+query:"",dateFilter?"Fecha en ubicación: "+dateFilter:"",entryFilter?"Ingreso: "+entryFilter:"","Verificación de entrada: "+verificationFilter,"Revista: "+revista.date,"Responsable: "+(currentUser?.nombre||currentUser?.usuario||""),"Revista: "+(revistaActive?revistaFilter:"TODOS"),"Check = encontrado; vacío = sin marcar","Marcas guardadas en este dispositivo"].filter(Boolean).join(" · ");
     if(format==="excel"){const XLSX=await import("xlsx");const sheet=XLSX.utils.aoa_to_sheet([[title],[detail],[],headers,...rows]);sheet["!cols"]=headers.map((h,i)=>({wch:Math.min(45,Math.max(h.length,...rows.map(row=>row[i].length))+2)}));const book=XLSX.utils.book_new();XLSX.utils.book_append_sheet(book,sheet,"Inventario");XLSX.writeFile(book,filename+".xlsx");}
     else {const [{jsPDF},{default:autoTable}]=await Promise.all([import("jspdf"),import("jspdf-autotable")]);const doc=new jsPDF({orientation:"landscape"});doc.setFontSize(14);doc.text(title,14,16);doc.setFontSize(9);const lines=doc.splitTextToSize(detail,268);doc.text(lines,14,23);autoTable(doc,{head:[headers],body:rows.map(row=>row.map((cell,index)=>index===9?(cell?"X":""):cell)),startY:28+lines.length*4,styles:{fontSize:7,cellPadding:2},headStyles:{fillColor:[13,44,62]},margin:{bottom:15},didDrawPage:()=>{doc.setFontSize(8);doc.text("CONTROL EXPLOSIVOS SK · Página "+doc.getNumberOfPages(),14,doc.internal.pageSize.getHeight()-7);}});doc.save(filename+".pdf");}
   }catch(cause){window.alert(cause instanceof Error?cause.message:"No se pudo exportar.");}finally{setExporting(false);}}
@@ -182,13 +215,14 @@ export default function Home() {
               <p className="hidden text-xs text-slate-300 sm:block">Control de inventario y ubicación</p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2"><Button type="button" onClick={()=>void loadRecords()} disabled={syncState==="syncing"} className="h-9 min-w-32 flex-col justify-center gap-0 rounded-lg bg-white px-3 py-0 text-[#0d2c3e] hover:bg-slate-100"><span className="flex items-center gap-1.5 text-[11px] font-semibold leading-none">{syncState==="syncing"?<RefreshCw className="h-3.5 w-3.5 animate-spin"/>:syncState==="success"?<Check className="h-3.5 w-3.5 text-emerald-600"/>:syncState==="error"?<AlertTriangle className="h-3.5 w-3.5 text-red-600"/>:<RefreshCw className="h-3.5 w-3.5"/>}SINCRONIZAR{pendingSync>0&&<span className="rounded-full bg-amber-400 px-1.5 py-0.5 text-[9px]">{pendingSync}</span>}</span><span className="mt-0.5 text-[9px] font-medium leading-none text-slate-500">{lastSync?`Sinc. ${lastSync}`:"Sin sincronización"}</span></Button><InstallAppButton/>{currentUser?.protegido===true&&<AccessDialog triggerClassName="h-9 border-white/30 bg-transparent px-3 text-xs font-semibold text-white hover:bg-white/10 hover:text-white"/>}<div className="max-w-40 text-center"><p className="truncate px-2 text-[11px] font-medium text-slate-200" title={currentUser?.nombre||currentUser?.usuario}>{currentUser?.nombre||currentUser?.usuario}</p><Button variant="ghost" className="h-8 text-white hover:bg-white/10 hover:text-white" onClick={() => { logout(); setAuthenticated(false); setCurrentUser(null); }}><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Cerrar sesión</span></Button></div></div>
+          <div className="flex flex-wrap items-center justify-end gap-2"><Button type="button" onClick={()=>void loadRecords()} disabled={syncState==="syncing"} className="h-9 min-w-32 flex-col justify-center gap-0 rounded-lg bg-white px-3 py-0 text-[#0d2c3e] hover:bg-slate-100"><span className="flex items-center gap-1.5 text-[11px] font-semibold leading-none">{syncState==="syncing"?<RefreshCw className="h-3.5 w-3.5 animate-spin"/>:syncState==="success"?<Check className="h-3.5 w-3.5 text-emerald-600"/>:syncState==="error"?<AlertTriangle className="h-3.5 w-3.5 text-red-600"/>:<RefreshCw className="h-3.5 w-3.5"/>}SINCRONIZAR{pendingSync>0&&<span className="rounded-full bg-amber-400 px-1.5 py-0.5 text-[9px]">{pendingSync}</span>}</span><span className="mt-0.5 text-[9px] font-medium leading-none text-slate-500">{lastSync?`Sinc. ${lastSync}`:"Sin sincronización"}</span></Button><InstallAppButton/>{currentUser?.protegido===true&&<AccessDialog triggerClassName="h-9 border-white/30 bg-transparent px-3 text-xs font-semibold text-white hover:bg-white/10 hover:text-white"/>}<div className="max-w-40 text-center"><p className="truncate px-2 text-[11px] font-medium text-slate-200" title={currentUser?.nombre||currentUser?.usuario}>{currentUser?.nombre||currentUser?.usuario}</p><Button variant="ghost" className="h-8 text-white hover:bg-white/10 hover:text-white" onClick={() => { if(revista.saving)return;if(revista.dirty&&!window.confirm("Hay checks sin guardar. ¿Cerrar sesión y descartar este borrador de revista?"))return;revista.cancel();logout(); setAuthenticated(false); setCurrentUser(null); }}><LogOut className="h-4 w-4" /><span className="hidden sm:inline">Cerrar sesión</span></Button></div></div>
         </div>
       </header>
 
       <div className="mx-auto max-w-6xl px-4 py-7 sm:px-8 sm:py-10">
         {syncError&&<section role="alert" className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
           <p className="font-semibold">{syncError}</p>
+          {retryDelay>0&&<p className="mt-1">Reintento automático en aproximadamente {Math.round(retryDelay/1000)} segundos mientras la app esté visible y conectada.</p>}
           {syncIssues.length>0&&<details className="mt-2"><summary className="cursor-pointer font-medium">Ver pendientes y motivos ({syncIssues.length})</summary><ul className="mt-2 space-y-2">{syncIssues.map(issue=><li key={issue.id}><strong>{issue.label}:</strong> {issue.message}</li>)}</ul></details>}
         </section>}
         <section className="mb-7" aria-label="Control de precintos">
@@ -247,17 +281,17 @@ export default function Home() {
               <div><h2 className="text-lg font-semibold">{selected === "SELLOS" ? "REGISTROS DE NOVEDADES DE PRECINTOS" : selected}</h2><p className="text-sm text-slate-500">{selected === "SELLOS" ? "Registros disponibles" : `Registros en ${selectedLocationLabel}`}</p></div>
               <span className="rounded-full bg-slate-100 px-3 py-1 text-sm font-medium text-slate-600">{visibleRecords.length} registros</span>
             </div>
-            {selected!=="SELLOS"&&<div className="flex flex-wrap items-center gap-2 border-b px-5 py-3"><Button type="button" variant="outline" size="sm" disabled={exporting||!visibleRecords.length||!revista.ready||revista.saving} onClick={()=>void exportInventory("excel")}>EXPORTAR EXCEL</Button><Button type="button" variant={revistaActive?"default":"outline"} size="sm" aria-pressed={revistaActive} disabled={revista.saving} onClick={()=>{setRevistaActive(active=>!active);setRevistaFilter("TODOS");}}>{revistaActive?"FINALIZAR REVISTA":"PASAR REVISTA"}</Button><Button type="button" variant="outline" size="sm" disabled={exporting||!visibleRecords.length||!revista.ready||revista.saving} onClick={()=>void exportInventory("pdf")}>EXPORTAR PDF</Button><Button type="button" variant={showEntryFilter?"default":"outline"} size="sm" onClick={()=>setShowEntryFilter(v=>!v)}>FILTRAR POR FECHA DE INGRESO</Button>{showEntryFilter&&<label className="flex items-center gap-2 text-xs font-semibold">FECHA DE INGRESO<Input type="date" value={entryFilter} onChange={e=>setEntryFilter(e.target.value)} className="w-auto"/>{entryFilter&&<Button type="button" variant="ghost" size="sm" onClick={()=>setEntryFilter("")}>LIMPIAR</Button>}</label>}</div>}
+            {selected!=="SELLOS"&&<div className="flex flex-wrap items-center gap-2 border-b px-5 py-3"><Button type="button" variant="outline" size="sm" disabled={exporting||!visibleRecords.length||!revista.ready||revista.saving||revista.dirty} title={revista.dirty?"Finaliza la revista para exportar las marcas guardadas":undefined} onClick={()=>void exportInventory("excel")}>EXPORTAR EXCEL</Button><Button type="button" variant={revistaActive?"default":"outline"} size="sm" aria-pressed={revistaActive} disabled={revista.saving||!revista.ready} onClick={async()=>{if(revistaActive){if(await revista.finish())setRevistaFilter("TODOS");}else{revista.begin();setRevistaFilter("TODOS");}}}>{revista.saving?"GUARDANDO…":revistaActive?"FINALIZAR REVISTA":"PASAR REVISTA"}</Button>{revistaActive&&<Button type="button" variant="outline" size="sm" disabled={revista.saving} onClick={()=>{revista.cancel();setRevistaFilter("TODOS");}}>CANCELAR REVISTA</Button>}<Button type="button" variant="outline" size="sm" disabled={exporting||!visibleRecords.length||!revista.ready||revista.saving||revista.dirty} title={revista.dirty?"Finaliza la revista para exportar las marcas guardadas":undefined} onClick={()=>void exportInventory("pdf")}>EXPORTAR PDF</Button><Button type="button" variant={showEntryFilter?"default":"outline"} size="sm" onClick={()=>setShowEntryFilter(v=>!v)}>FILTRAR POR FECHA DE INGRESO</Button>{showEntryFilter&&<label className="flex items-center gap-2 text-xs font-semibold">FECHA DE INGRESO<Input type="date" value={entryFilter} onChange={e=>setEntryFilter(e.target.value)} className="w-auto"/>{entryFilter&&<Button type="button" variant="ghost" size="sm" onClick={()=>setEntryFilter("")}>LIMPIAR</Button>}</label>}</div>}
             {selected !== "SELLOS" && revistaActive && <div className="border-b border-amber-200 bg-amber-50/60 px-5 py-4">
               <div className="flex flex-wrap items-end gap-3">
-                <label className="grid gap-1 text-sm font-semibold text-[#0d2c3e]">FECHA DE REVISTA<Input type="date" value={revista.date} disabled={revista.saving} onChange={event => { revista.setDate(event.target.value); setRevistaFilter("TODOS"); }} className="w-auto bg-white" /></label>
+                <label className="grid gap-1 text-sm font-semibold text-[#0d2c3e]">FECHA DE REVISTA<Input type="date" value={revista.date} disabled={revista.saving||revista.dirty} onChange={event => { revista.setDate(event.target.value); setRevistaFilter("TODOS"); }} className="w-auto bg-white" /></label>
                 <label className="grid gap-1 text-sm font-semibold text-[#0d2c3e]">REVISTA<select value={revistaFilter} disabled={!revista.ready} onChange={event => setRevistaFilter(event.target.value)} className="h-10 rounded-md border bg-white px-3 text-sm"><option value="TODOS">TODOS</option><option value="MARCADOS">CON CHECK</option><option value="SIN_MARCAR">SIN CHECK</option></select></label>
                 <p className="pb-2 text-sm text-slate-700" role="status">{revista.ready ? <><b>{checkedCount}</b> con check · <b>{selectedRecords.length - checkedCount}</b> sin check en los resultados</> : revista.date ? "Cargando revista…" : "Selecciona la fecha de revista"}{revista.saving && " · Guardando…"}</p>
               </div>
-              <p className="mt-2 text-sm text-slate-600">Marca lo que encuentres. Los checks se guardan por fecha en este dispositivo y se incluyen al exportar.</p>
+              <p className="mt-2 text-sm text-slate-600">Marca lo que encuentres. FINALIZAR REVISTA guarda los cambios por fecha en este dispositivo; CANCELAR REVISTA descarta el borrador y conserva las marcas anteriores. {revista.dirty&&"Hay cambios sin guardar. Finaliza o cancela antes de cambiar la fecha o exportar."}</p>
               {revista.error && <p role="alert" className="mt-2 text-sm font-medium text-red-700">{revista.error}</p>}
             </div>}
-            {selected!=="SELLOS"&&<div className="flex flex-wrap items-end gap-3 border-b px-5 py-3"><span className="self-center text-xs font-semibold text-slate-500">ORDEN ASCENDENTE</span>{inventoryOrder.map((order,index)=><label key={index} className="grid gap-1 text-xs font-semibold text-slate-600">{index===0?"PRIMER CRITERIO":"LUEGO POR"}<select aria-label={index===0?"Primer criterio de orden":"Segundo criterio de orden"} value={order} className="h-9 rounded-md border bg-white px-3 text-sm" onChange={e=>{const value=e.target.value as "FECHA"|"SERIAL";setInventoryOrder(current=>current.length===1?[value]:index===0?[value,value==="FECHA"?"SERIAL":"FECHA"]:[value==="FECHA"?"SERIAL":"FECHA",value]);}}><option value="FECHA">{selectedLocation==="interior"?"FECHA DE TRASLADO":"FECHA DE INGRESO"}</option><option value="SERIAL">SERIAL</option></select></label>)}{inventoryOrder.length===1?<Button type="button" variant="outline" size="sm" onClick={()=>setInventoryOrder(current=>[...current,current[0]==="FECHA"?"SERIAL":"FECHA"])}>+ AGREGAR FILTRO</Button>:<Button type="button" variant="ghost" size="sm" onClick={()=>setInventoryOrder(current=>[current[0]])}>QUITAR SEGUNDO CRITERIO</Button>}</div>}
+            {selected!=="SELLOS"&&<div className="flex flex-wrap items-end gap-3 border-b px-5 py-3"><Button type="button" variant="outline" size="sm" aria-pressed={orderDirection==="DESC"} title={orderDirection==="ASC"?"Cambiar a orden descendente":"Cambiar a orden ascendente"} onClick={()=>setOrderDirection(current=>current==="ASC"?"DESC":"ASC")}>{orderDirection==="ASC"?"↑ ORDEN ASCENDENTE":"↓ ORDEN DESCENDENTE"}</Button>{inventoryOrder.map((order,index)=><label key={index} className="grid gap-1 text-xs font-semibold text-slate-600">{index===0?"PRIMER CRITERIO":"LUEGO POR"}<select aria-label={index===0?"Primer criterio de orden":"Segundo criterio de orden"} value={order} className="h-9 rounded-md border bg-white px-3 text-sm" onChange={e=>{const value=e.target.value as "FECHA"|"SERIAL";setInventoryOrder(current=>current.length===1?[value]:index===0?[value,value==="FECHA"?"SERIAL":"FECHA"]:[value==="FECHA"?"SERIAL":"FECHA",value]);}}><option value="FECHA">{selectedLocation==="interior"?"FECHA DE TRASLADO":"FECHA DE INGRESO"}</option><option value="SERIAL">SERIAL</option></select></label>)}{inventoryOrder.length===1?<Button type="button" variant="outline" size="sm" onClick={()=>setInventoryOrder(current=>[...current,current[0]==="FECHA"?"SERIAL":"FECHA"])}>+ AGREGAR FILTRO</Button>:<Button type="button" variant="ghost" size="sm" onClick={()=>setInventoryOrder(current=>[current[0]])}>QUITAR SEGUNDO CRITERIO</Button>}</div>}
             <div role="search" aria-label="Buscar en el material seleccionado" className="min-w-0 border-b border-slate-200 bg-slate-50/70 px-4 py-3 sm:px-5">
               <div className="mb-2 flex items-center justify-between gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-600">Buscar y filtrar</span>
@@ -293,7 +327,7 @@ export default function Home() {
               </div>
             </div>
             {selected === "SELLOS" ? <SealHistory records={selectedRecords}/> : visibleRecords.length === 0 ? <div className="grid min-h-56 place-items-center px-6 py-10 text-center">
-              <div><Archive className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-3 font-medium">No hay registros de {selected === "SELLOS" ? "PRECINTOS" : `${selected} en ${selectedLocationLabel}`}</p><p className="mt-1 text-sm text-slate-500">{selected === "SELLOS" ? "Los precintos registrados aparecerán aquí." : revistaFilter === "SIN_MARCAR" ? "No quedan registros sin check entre los que coinciden con los filtros actuales." : "Se muestran los elementos que están actualmente en este lugar y coinciden con los filtros."}</p></div>
+              <div><Archive className="mx-auto h-9 w-9 text-slate-300" /><p className="mt-3 font-medium">No hay registros de {selected === "SELLOS" ? "PRECINTOS" : `${selected} en ${selectedLocationLabel}`}</p><p className="mt-1 text-sm text-slate-500">{selected === "SELLOS" ? "Los precintos registrados aparecerán aquí." : revistaActive && revistaFilter === "SIN_MARCAR" ? "No quedan registros sin check entre los que coinciden con los filtros actuales." : "Se muestran los elementos que están actualmente en este lugar y coinciden con los filtros."}</p></div>
             </div> : <div className="divide-y divide-slate-100">{visibleRecords.map((record) => {const subtitle=selected==="SELLOS"?[record.selloIndugel?`Precinto Indugel: ${String(record.selloIndugel)}`:"",record.selloAnfo?`Precinto ANFO: ${String(record.selloAnfo)}`:"",record.fecha,record.motivo].filter(Boolean).join(" · "):selected==="MECHA DE SEGURIDAD"?`${String(record.cantidad||record.contenido||2)} bobinas`:String(record.loteProduccion||record.contenido||"");return <article key={String(record.id)} className="grid gap-3 px-5 py-4 sm:grid-cols-[1fr_auto] sm:items-center"><div><div className="flex flex-wrap items-center gap-2"><p className="font-semibold">{String(record.serial || record.cajaNumero || `Registro ${record.id}`)}</p>{record.verificado===false&&<span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">PENDIENTE DE VERIFICAR</span>}</div>{subtitle&&<p className="text-sm text-slate-500">{subtitle}</p>}{selected!=="SELLOS"&&<p className="mt-1 text-xs text-slate-500">Ingreso: {String(record.fechaIngreso||"")} · Fabricación: {String(record.fechaFabricacion||record.fechaProduccion||"")} · Vencimiento: {String(record.fechaVencimiento||"")}{record.ubicacion==="Polvorín interior de mina"&&<> · Traslado al polvorín: {transferDate(record)?transferDate(record).slice(0,10):"Sin fecha registrada"}</>}</p>}</div>{selected!=="SELLOS"&&<div className="flex flex-wrap items-center gap-3 sm:justify-end">{revistaActive&&<label className={`flex min-h-12 cursor-pointer items-center gap-3 rounded-lg border px-3 py-2 text-sm font-semibold ${revista.checked(selected, record) ? "border-emerald-300 bg-emerald-50 text-emerald-800" : "border-slate-300 bg-white text-slate-700"}`}><Checkbox checked={revista.checked(selected, record)} disabled={!revista.ready || revista.saving} onCheckedChange={checked => void revista.toggle(selected, record, checked === true)} aria-label={`Revista ${revista.date}: ${String(record.serial || record.cajaNumero || record.id)}`} className="size-6 data-[state=checked]:border-emerald-700 data-[state=checked]:bg-emerald-700"/><span>{revista.checked(selected, record) ? "CON CHECK" : "SIN CHECK"}<span className="block text-xs font-normal">Revista {revista.date || "—"}</span></span></label>}<span className="flex items-center gap-2 text-sm text-slate-600"><MapPin className="h-4 w-4" />{String(record.ubicacion||"")}</span>{currentUser?.rol==="ADMINISTRADOR"&&<Button type="button" variant="outline" size="sm" onClick={()=>void removeRecord(record)} className="border-red-200 text-red-700 hover:bg-red-50 hover:text-red-800" title={`Eliminar ${String(record.serial||record.cajaNumero||record.id)}`}><Trash2 className="h-4 w-4"/><span className="hidden lg:inline">Eliminar</span></Button>}</div>}</article>})}</div>}
           </div>
         </section>
@@ -320,3 +354,4 @@ function AccessForm({ bootstrap, onSuccess }: { bootstrap: boolean; onSuccess: (
   }
   return <main className="grid min-h-screen place-items-center bg-slate-50 px-5"><section className="w-full max-w-md rounded-2xl border bg-white p-7 shadow-sm"><div className="text-center"><img src="/controles-varios-sk/logo-mecha-192.png?v=20261007-2" alt="" aria-hidden="true" className="mx-auto h-16 w-16 rounded-2xl" /><h1 className="mt-4 text-2xl font-semibold">CONTROL EXPLOSIVOS SK</h1><p className="mt-1 text-sm text-slate-500">{bootstrap ? "Crear administrador inicial" : "INICIAR SESIÓN"}</p></div><form onSubmit={submit} className="mt-6 space-y-4">{bootstrap && <label className="block text-sm font-medium">NOMBRE COMPLETO<Input name="nombre" required className="mt-1.5" /></label>}<label className="block text-sm font-medium">USUARIO<Input name="usuario" required autoComplete="username" className="mt-1.5" /></label><label className="block text-sm font-medium">CONTRASEÑA<Input name="password" type="password" required minLength={8} autoComplete={bootstrap ? "new-password" : "current-password"} className="mt-1.5" /></label>{error && <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}<Button className="h-11 w-full bg-[#0d2c3e]" disabled={saving}>{saving && <Loader2 className="h-4 w-4 animate-spin" />}{bootstrap ? "CREAR ADMINISTRADOR" : "INGRESAR"}</Button></form></section></main>;
 }
+

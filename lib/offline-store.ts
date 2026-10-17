@@ -27,6 +27,20 @@ export async function setLocal<T>(key: string, value: T) {
     tx.onabort = () => { db.close(); reject(tx.error || new Error('No se pudo guardar en este dispositivo.')); };
   });
 }
+// Merge against the latest value inside the write transaction, also across tabs.
+export async function updateLocal<T>(key: string, fallback: T, mutate: (current: T) => T): Promise<T> {
+  const db = await open();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE), request = store.get(key);
+    let result: T, failure: unknown;
+    request.onsuccess = () => {
+      try { result = mutate(request.result ?? fallback); store.put(result, key); }
+      catch (error) { failure = error; tx.abort(); }
+    };
+    tx.oncomplete = () => { db.close(); resolve(result); };
+    tx.onabort = () => { db.close(); reject(failure || tx.error || new Error('No se pudo guardar en este dispositivo.')); };
+  });
+}
 // Inventory and pending operations commit in one transaction, also across tabs.
 function changeState<T>(mutate: (records: Inventory, operations: OfflineOperation[]) => { records: Inventory; operations: OfflineOperation[]; result: T; syncedAt?: string }): Promise<T> {
   return open().then(db => new Promise<T>((resolve, reject) => {
@@ -70,3 +84,4 @@ export function acceptSnapshot(remote: Inventory, processed: string[] = []) {
     return { records, operations: remaining, syncedAt, result: { records, pending: remaining.length, syncedAt } };
   });
 }
+

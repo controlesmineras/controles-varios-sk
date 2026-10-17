@@ -1,6 +1,6 @@
 const ROOT = "/controles-varios-sk/";
 const PREFIX = "control-explosivos-shell-";
-const CACHE = PREFIX + "v19-__BUILD_ID__";
+const CACHE = PREFIX + "v20-__BUILD_ID__";
 // The Pages build replaces this list with every script, stylesheet and local asset.
 const PRECACHE = /* OFFLINE_ASSETS */ [ROOT];
 
@@ -55,4 +55,5 @@ self.addEventListener("fetch", event => {
     }
   })());
 });
+
 

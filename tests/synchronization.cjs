@@ -119,13 +119,14 @@ test('confirmación de otro ID no elimina el pendiente enviado', async () => {
   assert.equal((await h.store.getOperations()).length, 1);
 });
 
-test('un guardado durante la descarga permanece visible y pendiente', async () => {
+test('un guardado durante la descarga se envía automáticamente', async () => {
   const h = harness(), started = deferred(), release = deferred();
   h.setIntercept(async (body, reply) => { if (body.action === 'list') { const snapshot = reply(body); started.resolve(); await release.promise; return snapshot; } return reply(body); });
   const syncing = h.backend.synchronize(); await started.promise;
   const saved = await h.backend.saveRecord(record(101)); release.resolve();
   const result = await syncing;
-  assert.equal(result.pending, 1); assert.equal(result.records.ANFO[0].id, saved.id);
+  assert.equal(result.pending, 0); assert.equal(result.records.ANFO[0].id, saved.id);
+  assert.equal(h.db.records.ANFO[0].id,saved.id);
 });
 
 test('sincronizaciones simultáneas comparten una sola ejecución', async () => {
@@ -274,7 +275,7 @@ test('interrupción a mitad del grupo recupera los mismos cinco IDs', async () =
   assert.equal(result.pending, 0); assert.equal(h.db.records.ANFO.length, 5);
 });
 
-test('un guardado durante el último grupo permanece visible sin descarga adicional', async () => {
+test('un guardado durante el último grupo se envía sin descarga adicional', async () => {
   const h = harness(); for (let i = 0; i < 5; i++) await h.backend.saveRecord(record(100 + i));
   const started = deferred(), release = deferred();
   h.setIntercept(async (body, reply) => {
@@ -285,7 +286,9 @@ test('un guardado durante el último grupo permanece visible sin descarga adicio
   const syncing = h.backend.synchronize(); await started.promise;
   const saved = await h.backend.saveRecord(record(105)); release.resolve();
   const result = await syncing;
-  assert.equal(result.pending, 1); assert(result.records.ANFO.some(row => row.id === saved.id));
+  assert.equal(result.pending, 0); assert(result.records.ANFO.some(row => row.id === saved.id));
+  assert(h.db.records.ANFO.some(row=>row.id===saved.id));
+  assert.equal(h.calls.filter(x=>x.action==='status').length,1);
   assert.equal(h.calls.filter(x => x.action === 'list').length, 0);
 });
 
@@ -357,8 +360,47 @@ test('no se retira la eliminación si el inventario todavía contiene el registr
  const result=await h.backend.synchronize();assert.equal(result.pending,1);assert.equal(result.issues.length,1);
 });
 
+test('llegada continua de cambios termina tras tres rondas conservando el resto',async()=>{
+ const h=harness();await h.backend.saveRecord(record(100));let next=101;
+ h.setIntercept(async(body,reply)=>{const result=reply(body);if(body.action==='sync')await h.backend.saveRecord(record(next++));return result;});
+ const result=await h.backend.synchronize();assert.equal(result.pending,1);assert.equal(result.hasNewPending,true);
+ assert.equal(h.db.records.ANFO.length,3);assert.equal(result.records.ANFO.length,4);
+ assert.equal(h.calls.filter(x=>x.action==='sync').length,3);
+});
+test('nuevos cambios dependientes no adelantan un rechazo de la primera ronda',async()=>{
+ const h=harness();h.db.records.ANFO.push({...record(100),id:'existing'});
+ const item=await h.backend.saveRecord(record(100));let added=false;
+ h.setIntercept(async(body,reply)=>{const result=reply(body);if(body.action==='sync'&&!added){added=true;await h.backend.moveRecord('ANFO',item.id,'Polvorín interior de mina','2026-10-17T12:00:00.000Z');await h.backend.saveRecord(record(101));}return result;});
+ const result=await h.backend.synchronize();assert.equal(result.pending,2);assert.equal(result.issues.length,2);assert.match(result.issues[1].message,/cambio anterior/);
+ assert.equal(h.calls.filter(x=>x.action==='sync').length,2);assert.equal(h.db.records.ANFO.length,2);
+});
+test('corte después de guardar se clasifica para reintento sin perder el mismo ID',async()=>{
+ const h=harness();await h.backend.saveRecord(record(100));const id=(await h.store.getOperations())[0].id;
+ h.setIntercept((body,reply)=>{const result=reply(body);if(body.action==='sync')throw new Error('corte');return result;});
+ await assert.rejects(h.backend.synchronize(),error=>h.backend.isTransientSyncError(error));
+ h.setIntercept(null);const result=await h.backend.synchronize();assert.equal(result.pending,0);assert.equal(h.db.records.ANFO.length,1);
+ assert.equal(h.calls.filter(x=>x.action==='sync')[1].operations[0].id,id);
+});
+test('HTTP temporal permite reintento; permisos e inventario inválido lo detienen',async()=>{
+ for(const status of [408,429,500,503,401,403]){
+  const h=harness();await h.backend.saveRecord(record(100));h.context.fetch=async()=>({ok:false,status});
+  await assert.rejects(h.backend.synchronize(),error=>h.backend.isTransientSyncError(error)===[408,429,500,503].includes(status));
+  assert.equal((await h.store.getOperations()).length,1);
+ }
+ const h=harness();await h.backend.saveRecord(record(100));h.setIntercept((body,reply)=>body.action==='sync'?{ok:true,processed:[],records:{}}:reply(body));
+ await assert.rejects(h.backend.synchronize(),error=>!h.backend.isTransientSyncError(error));
+});
+test('actualizaciones locales concurrentes conservan marcas ajenas y abortan completas',async()=>{
+ const h=harness();await h.store.setLocal('revista-test',{old:'old'});
+ await Promise.all([h.store.updateLocal('revista-test',{},value=>({...value,a:'a'})),h.store.updateLocal('revista-test',{},value=>({...value,b:'b'}))]);
+ const marks=await h.store.getLocal('revista-test',{});assert.equal(marks.old,'old');assert.equal(marks.a,'a');assert.equal(marks.b,'b');
+ await assert.rejects(h.store.updateLocal('revista-test',{},value=>{delete value.old;throw new Error('fallo');}),/fallo/);
+ assert.equal((await h.store.getLocal('revista-test',{})).old,'old');
+});
+
 (async () => {
   for (const { name, run } of tests) { await run(); console.log('PASS:', name); }
   console.log(`${tests.length} pruebas de sincronización superadas; sin acceso a datos reales.`);
 })().catch(error => { console.error(error); process.exitCode = 1; });
+
 

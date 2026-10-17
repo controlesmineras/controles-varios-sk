@@ -8,14 +8,20 @@ declare global{interface Window{CONTROL_EXPLOSIVOS_CONFIG?:{apiUrl?:string};}}
 const apiUrl=()=>window.CONTROL_EXPLOSIVOS_CONFIG?.apiUrl?.trim()||"";type ApiResult=Record<string,any>;
 export function backendConfigured(){return Boolean(apiUrl());}
 class ApiRejection extends Error {}
+class ConnectionError extends Error {}
+export function isTransientSyncError(error: unknown) { return error instanceof ConnectionError; }
 async function request(action:string,data:Record<string,unknown>={},expectedToken?:string):Promise<ApiResult>{
  const url=apiUrl();if(!url)throw new Error("La aplicación aún no está conectada al servidor de la empresa.");
  const token=localStorage.getItem("control_explosivos_token")||"";
  if(expectedToken!==undefined&&token!==expectedToken)throw new Error("La sesión cambió. Vuelve a sincronizar con tu sesión actual.");
  let response:Response;
  try{response=await fetch(url,{method:"POST",body:new URLSearchParams({payload:JSON.stringify({action,token,...data})}),signal:AbortSignal.timeout(45000)});}
- catch(error){throw new Error(error instanceof Error&&/Timeout|Abort/.test(error.name)?"El servidor tardó demasiado en responder. Los pendientes se conservan; vuelve a sincronizar.":"No se pudo conectar con el servidor. Los pendientes se conservan; verifica tu conexión.");}
- if(response.ok===false)throw new Error(`El servidor respondió con error ${response.status}. Los pendientes se conservan.`);
+ catch(error){throw new ConnectionError(error instanceof Error&&/Timeout|Abort/.test(error.name)?"El servidor tardó demasiado en responder. Los pendientes se conservan; vuelve a sincronizar.":"No se pudo conectar con el servidor. Los pendientes se conservan; verifica tu conexión.");}
+ if(response.ok===false){
+  const message=`El servidor respondió con error ${response.status}. Los pendientes se conservan.`;
+  if([408,425,429].includes(response.status)||response.status>=500)throw new ConnectionError(message);
+  throw new Error(message);
+ }
  let result:ApiResult;try{result=await response.json();}catch{throw new Error("El servidor devolvió una respuesta inválida. Los pendientes se conservan.");}
  if(!result||result.ok!==true)throw new ApiRejection(result?.error||"No se pudo completar la operación.");
  if(expectedToken!==undefined&&localStorage.getItem("control_explosivos_token")!==expectedToken)throw new Error("La sesión cambió durante la sincronización. Los pendientes se conservan.");
@@ -78,12 +84,17 @@ async function runSynchronization(){
  if(!navigator.onLine)throw new Error("Sin conexión. Los pendientes siguen guardados en este dispositivo.");
  const token=localStorage.getItem("control_explosivos_token")||"";
  if(!token)throw new Error("Inicia sesión nuevamente para sincronizar. Los pendientes se conservan.");
- const operations=await getOperations(),issues:SyncIssue[]=[],blocked=new Set<string>();
+ let operations=await getOperations();
+ const issues:SyncIssue[]=[],blocked=new Set<string>(),attempted=new Set<string>();
+ let version=0;
  let latestRecords:Parameters<typeof acceptSnapshot>[0]|null=null;
+ for(let pass=0;pass<3;pass++){
  if(operations.length){
-  const status=await request("status",{},token),version=Number(status.apiVersion||0);
+  if(!version){
+  const status=await request("status",{},token);version=Number(status.apiVersion||0);
   if(status.authenticated!==true)throw new Error("La sesión del servidor venció. Cierra sesión y vuelve a ingresar con internet para sincronizar. Los pendientes se conservan.");
   if(version<3)throw new Error("Actualiza el servidor de Explosivos antes de sincronizar. Los pendientes se conservan.");
+  }
   const report=(operation:OfflineOperation,message:string)=>{operationKeys(operation).forEach(key=>blocked.add(key));issues.push({id:operation.id,label:operationLabel(operation),message});};
   async function sendGroup(group:OfflineOperation[]):Promise<void>{
    const eligible:OfflineOperation[]=[];
@@ -119,13 +130,19 @@ async function runSynchronization(){
     for(const operation of eligible)await sendGroup([operation]);
    }
   }
-  for(const group of synchronizationGroups(operations,version))await sendGroup(group);
+  for(const group of synchronizationGroups(operations,version)){
+   group.forEach(operation=>attempted.add(operation.id));
+   await sendGroup(group);
+  }
  }
- // Every successful sync already returns a full inventory. Avoid downloading it again.
- // Commit again locally to include changes queued while the final response was being handled.
- const remote=latestRecords??(await request("list",{},token)).records;
- const snapshot=await acceptSnapshot(remote);
- return {...snapshot,issues};
+ // Drain newly queued work too, without resending rejected IDs or looping forever.
+ if(!latestRecords){latestRecords=(await request("list",{},token)).records;validateInventory(latestRecords);}
+ await acceptSnapshot(latestRecords);
+ operations=(await getOperations()).filter(operation=>!attempted.has(operation.id));
+ if(!operations.length)break;
+ }
+ const snapshot=await acceptSnapshot(latestRecords!);
+ return {...snapshot,issues,hasNewPending:operations.length>0};
 }
 let syncing:ReturnType<typeof runSynchronization>|null=null;
 export function synchronize(){
@@ -154,4 +171,5 @@ export async function listSealPeople():Promise<{people:SealPerson[];warning?:str
  return {people:[...internal,...external],warning};
 }
 export async function saveExternalPerson(value:SealPerson){const person=sealPerson({...value,origen:"Externo"}),existing=await listSealPeople();if(existing.people.some(p=>p.documento===person.documento&&p.origen==="SK Admin"))throw new Error("Este documento ya pertenece a Personal de SK Admin. Selecciónalo en el buscador.");const rows=await getLocal<SealPerson[]>("sealExternalPeople",[]);await setLocal("sealExternalPeople",[...rows.filter(p=>p.documento!==person.documento),person]);await enqueue("externalUpsert",{person});return person;}
+
 

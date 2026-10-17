@@ -27,7 +27,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: node tests/device-access.cjs && node tests/offline-session.cjs && node tests/synchronization.cjs
+      - run: node tests/device-access.cjs && node tests/offline-session.cjs && node tests/synchronization.cjs && node tests/revista-order.cjs
       - run: pnpm exec next build
       - run: node scripts/build-offline-shell.mjs
       - uses: actions/configure-pages@v5
@@ -44,3 +44,4 @@ jobs:
       - name: Publicar
         id: deployment
         uses: actions/deploy-pages@v4
+

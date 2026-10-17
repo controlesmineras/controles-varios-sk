@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { getLocal, setLocal } from "@/lib/offline-store";
+import { getLocal, updateLocal } from "@/lib/offline-store";
 
 type Marks = Record<string, string>;
+type Session = { user: string; changes: Record<string, string | null> };
 
 export function todayInColombia() {
   const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "America/Bogota", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
@@ -14,17 +15,35 @@ export function revistaRecordKey(material: string, record: Record<string, unknow
   return JSON.stringify([material, String(record.id), String(record.ubicacion || "")]);
 }
 
-// A daily checklist on this device, separate from entry verification and inventory changes.
+function applyChanges(marks: Marks, changes: Session["changes"]) {
+  const next = { ...marks };
+  for (const [id, value] of Object.entries(changes)) {
+    if (value === null) delete next[id];
+    else next[id] = value;
+  }
+  return next;
+}
+
+// A local daily checklist. Drafts never change saved marks until explicitly finished.
 export function useRevista(user: string | undefined) {
-  const [date, setDate] = useState(todayInColombia);
+  const [date, changeDate] = useState(todayInColombia);
   const [loaded, setLoaded] = useState<{ key: string; marks: Marks } | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
+  const sessionRef = useRef<Session | null>(null);
   const [saving, setSaving] = useState(false);
   const savingRef = useRef(false);
   const [error, setError] = useState("");
   const key = user && date ? `revista:${JSON.stringify([user, date])}` : "";
+  const contextRef = useRef(key);
+  contextRef.current = key;
   const ready = Boolean(key && loaded?.key === key);
-  const marks = ready ? loaded!.marks : {};
+  const active = Boolean(user && session?.user === user);
+  const dirty = active && Object.keys(session!.changes).length > 0;
+  const marks = applyChanges(ready ? loaded!.marks : {}, active ? session!.changes : {});
 
+  function changeSession(value: Session | null) { sessionRef.current = value; setSession(value); }
+
+  useEffect(() => { changeSession(null); }, [user]);
   useEffect(() => {
     let cancelled = false;
     setLoaded(null);
@@ -36,26 +55,50 @@ export function useRevista(user: string | undefined) {
     });
     return () => { cancelled = true; };
   }, [key]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => { event.preventDefault(); event.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
-  async function toggle(material: string, record: Record<string, unknown>, checked: boolean) {
-    if (!ready || savingRef.current) return;
-    savingRef.current = true;
-    setSaving(true);
-    setError("");
-    const next = { ...marks };
-    const id = revistaRecordKey(material, record);
-    if (checked) next[id] = new Date().toISOString();
-    else delete next[id];
+  function begin() {
+    if (!user || !ready || savingRef.current || active) return;
+    setError(""); changeSession({ user, changes: {} });
+  }
+  function cancel() {
+    if (savingRef.current) return;
+    setError(""); changeSession(null);
+  }
+  function setDate(value: string) {
+    if (savingRef.current || Object.keys(sessionRef.current?.changes || {}).length) return;
+    changeDate(value);
+  }
+  function toggle(material: string, record: Record<string, unknown>, checked: boolean) {
+    const current = sessionRef.current;
+    if (!ready || !current || current.user !== user || savingRef.current) return;
+    const id = revistaRecordKey(material, record), changes = { ...current.changes };
+    if (Boolean(loaded!.marks[id]) === checked) delete changes[id];
+    else changes[id] = checked ? new Date().toISOString() : null;
+    changeSession({ ...current, changes }); setError("");
+  }
+  async function finish() {
+    const current = sessionRef.current;
+    if (!ready || !current || current.user !== user || savingRef.current) return false;
+    savingRef.current = true; setSaving(true); setError("");
     try {
-      await setLocal(key, next);
-      setLoaded({ key, marks: next });
+      if (Object.keys(current.changes).length) {
+        const saved = await updateLocal<Marks>(key, {}, latest => applyChanges(latest, current.changes));
+        if (contextRef.current === key) setLoaded({ key, marks: saved });
+      }
+      if (contextRef.current === key) changeSession(null);
+      return true;
     } catch {
-      setError("No se pudo guardar el check. Inténtalo de nuevo; la marca no se ha cambiado.");
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
+      if (contextRef.current === key) setError("No se pudo guardar la revista. El borrador sigue abierto; vuelve a pulsar FINALIZAR REVISTA.");
+      return false;
+    } finally { savingRef.current = false; setSaving(false); }
   }
 
-  return { date, setDate, ready, saving, error, toggle, checked: (material: string, record: Record<string, unknown>) => Boolean(marks[revistaRecordKey(material, record)]) };
+  return { date, setDate, ready, active, dirty, saving, error, begin, cancel, finish, toggle,
+    checked: (material: string, record: Record<string, unknown>) => Boolean(marks[revistaRecordKey(material, record)]) };
 }
