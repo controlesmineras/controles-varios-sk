@@ -22,7 +22,7 @@ async function request(action:string,data:Record<string,unknown>={},expectedToke
  return result;
 }
 function useSession(result:ApiResult){localStorage.setItem("control_explosivos_token",result.token);localStorage.setItem("control_explosivos_user",JSON.stringify(result.usuario));return result;}
-async function refreshAccess(token:string){try{const result=await request("status");if(localStorage.getItem("control_explosivos_token")!==token)return;if(result.authenticated&&result.usuario){localStorage.setItem("control_explosivos_user",JSON.stringify(result.usuario));deviceAccess.refresh(token,{token,usuario:result.usuario});window.dispatchEvent(new Event("explosivos-access-updated"));}else if(result.authenticated===false){logout();window.dispatchEvent(new Event("explosivos-access-updated"));}}catch{}}
+async function refreshAccess(token:string){try{const result=await request("status");if(localStorage.getItem("control_explosivos_token")!==token)return;if(result.authenticated&&result.usuario){const serialized=JSON.stringify(result.usuario),changed=localStorage.getItem("control_explosivos_user")!==serialized;localStorage.setItem("control_explosivos_user",serialized);deviceAccess.refresh(token,{token,usuario:result.usuario});if(changed)window.dispatchEvent(new Event("explosivos-access-updated"));}else if(result.authenticated===false){logout();window.dispatchEvent(new Event("explosivos-access-updated"));}}catch{}}
 export async function getStatus(){
  const token=localStorage.getItem("control_explosivos_token")||"";
  let user:ApiResult|null=null;
@@ -58,33 +58,57 @@ function compatibilityError(operation:OfflineOperation,version:number){
 function independentRejection(error:unknown){
  return error instanceof ApiRejection&&/ya existe|ya está registrado|ya se encuentra|no se encontró|no encontrado|ya no existe|no puede figurar dos veces|debe verificarse|campo .* obligatorio|no (?:es )?válid|no reconocido|rango|seriales|requiere rol administrador|documento ya pertenece/i.test(error.message);
 }
+// Keep payloads and server work bounded; dependent changes retain their order.
+function synchronizationGroups(operations:OfflineOperation[]){
+ const groups:OfflineOperation[][]=[];let group:OfflineOperation[]=[],bytes=0,keys=new Set<string>();
+ const flush=()=>{if(group.length)groups.push(group);group=[];bytes=0;keys=new Set<string>();};
+ for(const operation of operations){
+  if(["createBatch","verifyBatch","externalUpsert"].includes(operation.action)){flush();groups.push([operation]);continue;}
+  const operationBytes=new TextEncoder().encode(JSON.stringify(operation)).byteLength,operationIds=operationKeys(operation);
+  if(group.length>=5||bytes+operationBytes>64*1024||operationIds.some(id=>keys.has(id)))flush();
+  group.push(operation);bytes+=operationBytes;operationIds.forEach(id=>keys.add(id));
+ }
+ flush();return groups;
+}
 async function runSynchronization(){
  if(!navigator.onLine)throw new Error("Sin conexión. Los pendientes siguen guardados en este dispositivo.");
  const token=localStorage.getItem("control_explosivos_token")||"";
  if(!token)throw new Error("Inicia sesión nuevamente para sincronizar. Los pendientes se conservan.");
  const operations=await getOperations(),issues:SyncIssue[]=[],blocked=new Set<string>();
+ let latestRecords:Parameters<typeof acceptSnapshot>[0]|null=null;
  if(operations.length){
   const status=await request("status",{},token),version=Number(status.apiVersion||0);
   if(status.authenticated!==true)throw new Error("La sesión del servidor venció. Cierra sesión y vuelve a ingresar con internet para sincronizar. Los pendientes se conservan.");
   if(version<3)throw new Error("Actualiza el servidor de Explosivos antes de sincronizar. Los pendientes se conservan.");
-  for(const operation of operations){
-   const keys=operationKeys(operation);
-   let message=keys.some(key=>blocked.has(key))?"Espera la confirmación de un cambio anterior de este registro.":compatibilityError(operation,version);
-   if(!message){
-    try{
-     // One stable operation ID per request: an invalid record cannot block unrelated records.
-     const result=await request("sync",{operations:[{id:operation.id,action:operation.action,data:operation.data}]},token);
-     validateInventory(result.records);
-     if(!Array.isArray(result.processed)||result.processed.length!==1||result.processed[0]!==operation.id)throw new Error("El servidor no confirmó el pendiente enviado. Se conserva para reintentar.");
-     await acceptSnapshot(result.records,[operation.id]);
-     window.dispatchEvent(new Event("explosivos-sync-progress"));
-    }catch(error){if(!independentRejection(error))throw error;message=(error as Error).message;}
+  const report=(operation:OfflineOperation,message:string)=>{operationKeys(operation).forEach(key=>blocked.add(key));issues.push({id:operation.id,label:operationLabel(operation),message});};
+  async function sendGroup(group:OfflineOperation[]):Promise<void>{
+   const eligible:OfflineOperation[]=[];
+   for(const operation of group){
+    const message=operationKeys(operation).some(key=>blocked.has(key))?"Espera la confirmación de un cambio anterior de este registro.":compatibilityError(operation,version);
+    if(message)report(operation,message);else eligible.push(operation);
    }
-   if(message){keys.forEach(key=>blocked.add(key));issues.push({id:operation.id,label:operationLabel(operation),message});}
+   if(!eligible.length)return;
+   try{
+    const result=await request("sync",{operations:eligible.map(operation=>({id:operation.id,action:operation.action,data:operation.data}))},token);
+    validateInventory(result.records);
+    const expected=new Set(eligible.map(operation=>operation.id));
+    if(!Array.isArray(result.processed)||result.processed.length!==expected.size||new Set(result.processed).size!==expected.size||result.processed.some((id:unknown)=>typeof id!=="string"||!expected.has(id)))throw new Error("El servidor no confirmó todos los pendientes enviados. Se conservan para reintentar.");
+    await acceptSnapshot(result.records,result.processed);
+    latestRecords=result.records;
+    window.dispatchEvent(new Event("explosivos-sync-progress"));
+   }catch(error){
+    if(!independentRejection(error))throw error;
+    if(eligible.length===1){report(eligible[0],(error as Error).message);return;}
+    // A rejected batch may already have committed a prefix. Stable IDs make these retries safe.
+    for(const operation of eligible)await sendGroup([operation]);
+   }
   }
+  for(const group of synchronizationGroups(operations))await sendGroup(group);
  }
- const result=await request("list",{},token);
- const snapshot=await acceptSnapshot(result.records);
+ // Every successful sync already returns a full inventory. Avoid downloading it again.
+ // Commit again locally to include changes queued while the final response was being handled.
+ const remote=latestRecords??(await request("list",{},token)).records;
+ const snapshot=await acceptSnapshot(remote);
  return {...snapshot,issues};
 }
 let syncing:ReturnType<typeof runSynchronization>|null=null;

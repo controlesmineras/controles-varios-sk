@@ -191,6 +191,97 @@ test('superposición conserva verificaciones, movimientos y eliminaciones', asyn
   assert.equal(remote.ANFO.length, 2, 'The server snapshot is not mutated');
 });
 
+test('27 pendientes válidos requieren 7 solicitudes en lugar de 29', async () => {
+  const h = harness();
+  for (let i = 0; i < 27; i++) await h.backend.saveRecord(record(100 + i));
+  const result = await h.backend.synchronize();
+  assert.equal(result.pending, 0); assert.equal(h.db.records.ANFO.length, 27);
+  assert.equal(h.calls.length, 7);
+  assert.deepEqual(h.calls.filter(x => x.action === 'sync').map(x => x.operations.length), [5, 5, 5, 5, 5, 2]);
+  assert.equal(h.calls.filter(x => x.action === 'list').length, 0);
+});
+
+test('rechazo a mitad del grupo reintenta los confirmados sin duplicarlos', async () => {
+  const h = harness(); h.db.records.ANFO.push({ ...record(102), id: 'remote-existing' });
+  for (let i = 0; i < 5; i++) await h.backend.saveRecord(record(100 + i));
+  const result = await h.backend.synchronize();
+  assert.equal(result.pending, 1); assert.equal(result.issues.length, 1);
+  assert.equal(h.db.records.ANFO.length, 5);
+  for (let i = 100; i <= 104; i++) assert.equal(h.db.records.ANFO.filter(row => row.serial === i).length, 1);
+  const calls = h.calls.filter(x => x.action === 'sync');
+  assert.equal(calls[0].operations.length, 5);
+  assert.equal(calls[1].operations[0].id, calls[0].operations[0].id);
+});
+
+test('cambios del mismo registro mantienen el orden entre grupos', async () => {
+  const h = harness();
+  const saved = await h.backend.saveRecord(record(100));
+  await h.backend.moveRecord('ANFO', saved.id, 'Polvorín interior de mina', '2026-10-17T12:00:00.000Z');
+  await h.backend.moveRecord('ANFO', saved.id, 'Polvorín superficie', '2026-10-17T13:00:00.000Z');
+  await h.backend.saveRecord(record(101));
+  const result = await h.backend.synchronize();
+  assert.equal(result.pending, 0);
+  const item = h.db.records.ANFO.find(row => row.id === saved.id);
+  assert.equal(item.ubicacion, 'Polvorín superficie'); assert.equal(item.movimientos.length, 2);
+  for (const call of h.calls.filter(x => x.action === 'sync')) {
+    const keys = call.operations.flatMap(op => [...h.state.operationKeys(op)]);
+    assert.equal(keys.length, new Set(keys).size);
+  }
+});
+
+test('ingreso de cien unidades se envía separado de otros cambios', async () => {
+  const h = harness(); await h.backend.saveRecord(record(100));
+  await h.backend.saveBatchRecords({ ...record(200), rangos: [{ desde: 200, hasta: 299 }] });
+  await h.backend.saveRecord(record(300));
+  const result = await h.backend.synchronize();
+  assert.equal(result.pending, 0); assert.equal(h.db.records.ANFO.length, 102);
+  const call = h.calls.find(x => x.action === 'sync' && x.operations.some(op => op.action === 'createBatch'));
+  assert.equal(call.operations.length, 1);
+});
+
+test('confirmación parcial de un grupo conserva todos sus pendientes', async () => {
+  const h = harness(); for (let i = 0; i < 5; i++) await h.backend.saveRecord(record(100 + i));
+  h.setIntercept((body, reply) => body.action === 'sync' ? { ok: true, processed: [body.operations[0].id], records: blank() } : reply(body));
+  await assert.rejects(h.backend.synchronize(), /no confirmó/);
+  assert.equal((await h.store.getOperations()).length, 5);
+  assert.equal((await h.store.getCachedRecords()).ANFO.length, 5);
+});
+
+test('interrupción a mitad del grupo recupera los mismos cinco IDs', async () => {
+  const h = harness(); for (let i = 0; i < 5; i++) await h.backend.saveRecord(record(100 + i));
+  const ids = (await h.store.getOperations()).map(op => op.id);
+  h.setIntercept((body, reply) => {
+    if (body.action === 'sync') { reply({ ...body, operations: body.operations.slice(0, 2) }); throw new Error('Connection lost'); }
+    return reply(body);
+  });
+  await assert.rejects(h.backend.synchronize(), /No se pudo conectar/);
+  assert.deepEqual((await h.store.getOperations()).map(op => op.id), ids);
+  h.setIntercept(null); const result = await h.backend.synchronize();
+  assert.equal(result.pending, 0); assert.equal(h.db.records.ANFO.length, 5);
+});
+
+test('un guardado durante el último grupo permanece visible sin descarga adicional', async () => {
+  const h = harness(); for (let i = 0; i < 5; i++) await h.backend.saveRecord(record(100 + i));
+  const started = deferred(), release = deferred();
+  h.setIntercept(async (body, reply) => {
+    const result = reply(body);
+    if (body.action === 'sync') { started.resolve(); await release.promise; }
+    return result;
+  });
+  const syncing = h.backend.synchronize(); await started.promise;
+  const saved = await h.backend.saveRecord(record(105)); release.resolve();
+  const result = await syncing;
+  assert.equal(result.pending, 1); assert(result.records.ANFO.some(row => row.id === saved.id));
+  assert.equal(h.calls.filter(x => x.action === 'list').length, 0);
+});
+
+test('validar la misma sesión no dispara otra recarga de inventario', async () => {
+  const h = harness();
+  h.setIntercept((body, reply) => body.action === 'status' ? { ...reply(body), usuario: JSON.parse(h.local.get('control_explosivos_user')) } : reply(body));
+  await h.backend.getStatus(); await new Promise(setImmediate);
+  assert.equal(h.events.filter(event => event === 'explosivos-access-updated').length, 0);
+});
+
 (async () => {
   for (const { name, run } of tests) { await run(); console.log('PASS:', name); }
   console.log(`${tests.length} pruebas de sincronización superadas; sin acceso a datos reales.`);
