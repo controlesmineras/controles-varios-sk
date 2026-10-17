@@ -191,7 +191,7 @@ test('ingreso online espera el token renovado antes de retornar', async () => {
   assert.equal(h.local.get('control_explosivos_token'), 'fresh-token');
 });
 
-test('superposición conserva verificaciones, movimientos y eliminaciones', async () => {
+test('superposición conserva cambios y no oculta seriales por eliminaciones pausadas', async () => {
   const h = harness();
   const remote = blank(); remote.ANFO = [{ ...record(100), id: 'one', movimientos: [], verificado: false }, { ...record(101), id: 'two' }];
   const pending = [
@@ -200,7 +200,7 @@ test('superposición conserva verificaciones, movimientos y eliminaciones', asyn
     { id: 'd', action: 'deleteRecord', data: { tipo: 'ANFO', id: 'two' } },
   ].map(op => ({ ...op, createdAt: '2026-10-17T13:00:00.000Z' }));
   const result = h.state.overlayPending(remote, pending);
-  assert.equal(result.ANFO.length, 1); assert.equal(result.ANFO[0].verificado, true);
+  assert.equal(result.ANFO.length, 2); assert.equal(result.ANFO[0].verificado, true);
   assert.equal(result.ANFO[0].ubicacion, 'Polvorín interior de mina');
   assert.equal(h.state.overlayPending(result, pending).ANFO[0].movimientos.length, 1);
   assert.equal(remote.ANFO.length, 2, 'The server snapshot is not mutated');
@@ -307,10 +307,10 @@ test('operador: crear, verificar y mover no exige rol administrador', async () =
  await h.backend.moveRecord('ANFO',item.id,'Polvorín interior de mina','2026-10-17T12:00:00.000Z');
  const result=await h.backend.synchronize();assert.equal(result.pending,0);assert.equal(h.db.records.ANFO[0].ubicacion,'Polvorín interior de mina');
 });
-test('operador: eliminación rechazada no bloquea otros registros',async()=>{
+test('eliminación pausada no bloquea otros registros',async()=>{
  const h=harness(7,'OPERADOR');h.db.records.ANFO.push({...record(100),id:'existing'});
- await h.store.acceptSnapshot(h.db.records);await h.backend.deleteRecord('ANFO','existing');await h.backend.saveRecord(record(101));
- const result=await h.backend.synchronize();assert.equal(result.pending,1);assert.match(result.issues[0].message,/rol administrador/);
+ await h.store.acceptSnapshot(h.db.records);await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'existing'});await h.backend.saveRecord(record(101));
+ const result=await h.backend.synchronize();assert.equal(result.pending,1);assert.match(result.issues[0].message,/deshabilitada/);
  assert.equal(h.db.records.ANFO.length,2);assert.equal(h.writes,1);assert.equal(h.calls.length,2);
 });
 test('recibos individuales identifican rechazo y dependencias dentro del mismo lote',async()=>{
@@ -340,24 +340,18 @@ test('servidor anterior conserva lotes de cinco y confirmaciones completas',asyn
  const result=await h.backend.synchronize();assert.equal(result.pending,0);assert.equal(h.calls.length,7);assert.equal(h.writes,27);
 });
 
-test('doble eliminación con IDs distintos confirma el estado ya eliminado',async()=>{
- const h=harness();h.db.records.ANFO.push({...record(100),id:'delete-me'});
- await h.store.acceptSnapshot(h.db.records);
- await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'delete-me'});
- await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'delete-me'});
- const result=await h.backend.synchronize();assert.equal(result.pending,0);assert.equal(h.db.deletedRecords.length,1);assert.equal(h.db.records.ANFO.length,0);
+test('eliminaciones anteriores no se envían ni ocultan seriales del servidor',async()=>{
+ for(const version of [6,7]){
+  const h=harness(version);h.db.records.ANFO.push({...record(100),id:'delete-me'});await h.store.acceptSnapshot(h.db.records);
+  await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'delete-me'});await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'delete-me'});
+  const result=await h.backend.synchronize();assert.equal(result.pending,2);assert.equal(h.db.deletedRecords.length,0);assert.equal(result.records.ANFO.length,1);
+  assert.equal(h.calls.filter(x=>x.action==='sync').length,0);assert.match(result.issues[0].message,/deshabilitada/);
+ }
 });
-test('servidor anterior: segunda eliminación se concilia con inventario completo',async()=>{
- const h=harness(6);h.db.records.ANFO.push({...record(100),id:'delete-me'});await h.store.acceptSnapshot(h.db.records);
- await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'delete-me'});await h.backend.synchronize();
- await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'delete-me'});
- h.setIntercept((body,reply)=>body.action==='sync'?{ok:false,error:'El registro que intentas eliminar ya no existe.'}:reply(body));
- const result=await h.backend.synchronize();assert.equal(result.pending,0);assert.equal(h.db.deletedRecords.length,1);
-});
-test('no se retira la eliminación si el inventario todavía contiene el registro',async()=>{
- const h=harness(6);h.db.records.ANFO.push({...record(100),id:'delete-me'});await h.store.acceptSnapshot(h.db.records);await h.store.enqueue('deleteRecord',{tipo:'ANFO',id:'delete-me'});
- h.setIntercept((body,reply)=>body.action==='sync'?{ok:false,error:'El registro que intentas eliminar ya no existe.'}:reply(body));
- const result=await h.backend.synchronize();assert.equal(result.pending,1);assert.equal(result.issues.length,1);
+test('la función antigua no permite generar nuevas eliminaciones',async()=>{
+ const h=harness();await h.backend.saveRecord(record(100));const item=(await h.store.getCachedRecords()).ANFO[0];
+ await assert.rejects(h.backend.deleteRecord('ANFO',item.id),/deshabilitada/);assert.equal((await h.store.getCachedRecords()).ANFO.length,1);
+ assert.equal((await h.store.getOperations()).filter(op=>op.action==='deleteRecord').length,0);
 });
 
 test('llegada continua de cambios termina tras tres rondas conservando el resto',async()=>{

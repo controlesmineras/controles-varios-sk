@@ -33,8 +33,8 @@ export function overlayPending(remote: Inventory, pending: OfflineOperation[]): 
         if (item && !records[type].some(row => String(row.id) === String(item.id))) records[type].unshift(structuredClone(item));
       }
     } else if (operation.action === "deleteRecord") {
-      const type = String(data.tipo);
-      if (records[type]) records[type] = records[type].filter(row => String(row.id) !== String(data.id));
+      // Historical deletion requests are paused. Do not hide a serial still on the server.
+      continue;
     } else if (operation.action === "verifyBatch" && Array.isArray(data.unidades)) {
       for (const unit of data.unidades) {
         const item = records[String(data.tipo)]?.find(row => String(row.id) === String(unit.id));
@@ -57,3 +57,4 @@ export function operationLabel(operation: OfflineOperation): string {
   const batch = data.batch as Record<string, unknown> | undefined;
   return `${record?.tipo || batch?.tipo || data.tipo || "Directorio"} · ${record?.serial || record?.cajaNumero || data.id || operation.id.slice(0, 8)}`;
 }
+
