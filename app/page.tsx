@@ -16,7 +16,7 @@ import { CorrectionsDialog } from "@/components/corrections-dialog";
 import { MovementDialog } from "@/components/movement-dialog";
 import { VerificationDialog } from "@/components/verification-dialog";
 import { InstallAppButton } from "@/components/install-app-button";
-import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout, pendingOperations, synchronize, isTransientSyncError } from "@/lib/backend";
+import { backendConfigured, createInitialAdmin, getStatus, listRecords, login, logout, pendingOperations, synchronize, isTransientSyncError, resolveExternalPersonConflict, type SyncIssue } from "@/lib/backend";
 
 const modules = [
   { name: "INDUGEL", tone: "green" },
@@ -85,7 +85,10 @@ export default function Home() {
   const [syncState,setSyncState]=useState<"idle"|"syncing"|"success"|"error">("idle");
   const [lastSync,setLastSync]=useState("");
   const [syncError,setSyncError]=useState("");
-  const [syncIssues,setSyncIssues]=useState<Array<{id:string;label:string;message:string}>>([]);
+  const [syncIssues,setSyncIssues]=useState<SyncIssue[]>([]);
+  const [resolvingPerson,setResolvingPerson]=useState("");
+  const [personResolutionNotice,setPersonResolutionNotice]=useState("");
+  const [personResolutionError,setPersonResolutionError]=useState("");
   const [pendingSync,setPendingSync]=useState(0);
   const [records, setRecords] = useState<Record<string, Array<Record<string, unknown>>>>({});
   const [retryDelay,setRetryDelay]=useState(0);
@@ -126,6 +129,18 @@ export default function Home() {
       return false;
     } finally { loadingRecords.current=false; }
   }, []);
+  async function resolvePerson(issue:SyncIssue){
+    if(resolvingPerson)return;
+    setResolvingPerson(issue.id);setPersonResolutionError("");setPersonResolutionNotice("");
+    try{
+      const result=await resolveExternalPersonConflict(issue.id),resolved=new Set(result.resolvedIds);
+      setSyncIssues(current=>current.filter(row=>!resolved.has(row.id)));
+      setPendingSync(await pendingOperations());
+      setPersonResolutionNotice(`${result.person.nombre} · Documento ${result.person.documento}: alta externa pendiente resuelta con Personal de SK Admin. Los registros de precintos se conservan.`);
+      await loadRecords();
+    }catch(error){setPersonResolutionError(error instanceof Error?error.message:"No se pudo resolver el pendiente. Vuelve a intentarlo.");}
+    finally{setResolvingPerson("");}
+  }
   useEffect(()=>{
     if(!authenticated){setRetryDelay(0);retryCount.current=0;return;}
     if(!retryDelay)return;
@@ -225,8 +240,10 @@ export default function Home() {
         {syncError&&<section role="alert" className="mb-5 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">
           <p className="font-semibold">{syncError}</p>
           {retryDelay>0&&<p className="mt-1">Reintento automático en aproximadamente {Math.round(retryDelay/1000)} segundos mientras la app esté visible y conectada.</p>}
-          {syncIssues.length>0&&<details className="mt-2"><summary className="cursor-pointer font-medium">Ver pendientes y motivos ({syncIssues.length})</summary><ul className="mt-2 space-y-2">{syncIssues.map(issue=><li key={issue.id}><strong>{issue.label}:</strong> {issue.message}</li>)}</ul></details>}
+          {syncIssues.length>0&&<details className="mt-2" open={syncIssues.some(issue=>issue.resolution==="useInternalPerson")}><summary className="cursor-pointer font-medium">Ver pendientes y motivos ({syncIssues.length})</summary><ul className="mt-2 space-y-3">{syncIssues.map(issue=><li key={issue.id}><strong>{issue.label}:</strong> {issue.message}{issue.resolution==="useInternalPerson"&&<div className="mt-2"><Button type="button" variant="outline" size="sm" disabled={!!resolvingPerson||syncState==="syncing"} onClick={()=>void resolvePerson(issue)}>{resolvingPerson===issue.id?"COMPROBANDO PERSONA…":"USAR PERSONA DE SK ADMIN"}</Button></div>}</li>)}</ul></details>}
         </section>}
+        {personResolutionError&&<p role="alert" className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{personResolutionError}</p>}
+        {personResolutionNotice&&<p role="status" className="mb-5 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">{personResolutionNotice}</p>}
         <section className="mb-7" aria-label="Control de precintos">
           <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <button type="button" onClick={openSealHistory} className="flex items-center gap-3 text-left"><span className="grid h-11 w-11 place-items-center rounded-xl bg-[#f5b51b] text-[#0d2c3e]"><ShieldCheck className="h-6 w-6"/></span><span><strong className="block">CONTROL DE PRECINTOS</strong><span className="text-sm text-slate-600">{records.SELLOS?.length || 0} registros de seguridad</span></span></button>

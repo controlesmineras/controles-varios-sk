@@ -55,3 +55,12 @@ node tests/revista-order.cjs
 El botón de eliminar seriales fue retirado. Los administradores disponen de **REVERTIR / RECUPERAR** para cancelar solicitudes antiguas de eliminación, recuperar registros desde su copia archivada y revertir el último traslado conservando serial e historial. Las correcciones requieren motivo y confirmación del servidor; no se aplican de forma optimista sobre el inventario local. Las reversiones rechazadas por cambios posteriores quedan auditadas sin bloquear futuros movimientos.
 
 **Requiere actualizar el servidor existente a API 8:** ver [instrucciones de Apps Script](apps-script/README.md#correcciones-sin-retirar-seriales-api-8). Publicar el sitio por GitHub no actualiza automáticamente el proyecto de Google Apps Script.
+
+
+## Pendiente: el documento ya pertenece a Personal de SK Admin
+
+En el dispositivo que muestra el aviso, recargar la app y pulsar **SINCRONIZAR**. El motivo identifica nombre y documento y muestra **USAR PERSONA DE SK ADMIN**. Esta acción consulta el directorio central y exige una coincidencia única por documento antes de resolver las altas externas pendientes de esa persona en ese dispositivo. Funciona también con usuarios operadores.
+
+Se conservan los precintos, sus participantes históricos, los seriales y los demás pendientes. Las solicitudes resueltas se archivan localmente con el usuario, la fecha y la persona confirmada; el buscador prioriza la ficha de SK Admin sobre una copia externa. Si falta conexión, el directorio no es accesible o hay datos ambiguos, el pendiente permanece y el mensaje indica qué revisar.
+
+Este ajuste es de la app y funciona con el servidor de participantes existente (API 6 o posterior); no requiere otra modificación de `Code.gs`.

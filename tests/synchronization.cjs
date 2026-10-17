@@ -15,7 +15,8 @@ function harness(version = 7, role = "ADMINISTRADOR") {
   const server = { Utilities: { getUuid: () => crypto.randomUUID() } };
   vm.createContext(server);
   vm.runInContext(fs.readFileSync(path.join(root, 'apps-script/Code.gs'), 'utf8'), server);
-  let db = server.emptyDb_(), writes = 0, failWrite = false;
+  let db = server.emptyDb_(), writes = 0, failWrite = false, directory = [], directoryWarning = '';
+  server.centralSealPeople_ = () => { if(directoryWarning)throw new Error(directoryWarning);return clone(directory); };
   server.load_ = () => clone(db);
   server.locked_ = fn => { const draft = clone(db); const result = fn(draft); if(failWrite)throw new Error("Drive no disponible");db = draft; writes++;return result; };
   const calls = [], events = [];
@@ -23,6 +24,7 @@ function harness(version = 7, role = "ADMINISTRADOR") {
   const defaultReply = body => {
     if (body.action === 'status') return { ok: true, apiVersion: version, authenticated: true, usuario: { usuario: 'audit', rol: role } };
     if (body.action === 'deletedRecordsList') { try { return server.deletedRecordsList_({usuario:'audit',rol:role}); } catch (error) { return {ok:false,error:error.message}; } }
+    if (body.action === 'sealPeople') return server.sealPeople_();
     if (body.action === 'list') return { ok: true, records: clone(db.records) };
     if (body.action === 'sync') {
       try {
@@ -34,6 +36,7 @@ function harness(version = 7, role = "ADMINISTRADOR") {
           else if(op.action==='move')server.move_(data,user.usuario,id);
           else if(op.action==='createBatch')server.createBatch_(data.batch,user.usuario,id);
           else if(op.action==='verifyBatch')server.verifyBatch_(data,user.usuario,id);
+          else if(op.action==='externalUpsert')server.externalUpsert_(data.person,user.usuario,id);
           else if(op.action==='deleteRecord')server.deleteRecord_(data,user,id);
           else throw new Error('Operación pendiente no reconocida');
           processed.push(id);
@@ -67,7 +70,7 @@ function harness(version = 7, role = "ADMINISTRADOR") {
     return module.exports;
   }
   return { backend: load('lib/backend.ts'), store: load('lib/offline-store.ts'), state: load('lib/sync-state.ts'), corrections: load('lib/inventory-corrections.ts'), order: load('lib/inventory-order.ts'), context, local, calls, events,
-    get db() { return db; }, get writes(){return writes;}, failWrite:()=>{failWrite=true;}, server, setIntercept: value => { intercept = value; } };
+    setDirectory:(people,warning='')=>{directory=clone(people);directoryWarning=warning;}, get db() { return db; }, get writes(){return writes;}, failWrite:()=>{failWrite=true;}, server, setIntercept: value => { intercept = value; } };
 }
 const tests = [];
 function test(name, run) { tests.push({ name, run }); }
@@ -525,6 +528,75 @@ test('rechazo por ID faltante conserva inventario local y operación aun si lleg
  h.setIntercept((body,reply)=>body.action==='sync'?{ok:true,syncProtocol:'explosivos-receipts-v1',processed:[id],rejected:[],records:broken}:reply(body));
  await assert.rejects(h.backend.synchronize(),/serial 777/);
  assert.equal(JSON.stringify(await h.store.getCachedRecords()),before);assert.equal((await h.store.getOperations())[0].id,id);
+});
+
+const externalPerson=()=>({documento:'101001',nombre:'Persona de prueba',cargo:'Operador de seguridad',empresa:'SK',origen:'Externo'});
+const internalPerson=()=>({...externalPerson(),origen:'SK Admin'});
+const sealFixture=()=>({tipo:'SELLOS',fecha:'2026-10-17',hora:'12:00',fechaNovedad:'2026-10-17T12:00:00-05:00',sealSchema:2,selloAnfo:'P-101',motivo:'Inventario',funcionarioSeguridad:{documento:'999999',nombre:'Responsable de prueba',cargo:'Supervisor',empresa:'SK',origen:'SK Admin'},asistentes:[externalPerson()]});
+test('conflicto de documento ofrece persona, motivo y acción resolutiva en API 6 y API 8',async()=>{
+ for(const version of [6,8]){
+  const h=harness(version,'OPERADOR');h.setDirectory([internalPerson()]);
+  const first=await h.store.enqueue('externalUpsert',{person:externalPerson()});
+  await h.store.enqueue('externalUpsert',{person:externalPerson()});
+  await h.backend.saveRecord(sealFixture());await h.backend.saveRecord(record(555));
+  const result=await h.backend.synchronize();assert.equal(result.pending,2);
+  const issue=result.issues.find(issue=>issue.id===first.id);assert.equal(issue.resolution,'useInternalPerson');assert.match(issue.label,/Persona de prueba.*101001/);assert.match(issue.message,/USAR PERSONA DE SK ADMIN/);
+  const serverBefore=JSON.stringify(h.db.records),localBefore=JSON.stringify(await h.store.getCachedRecords());
+  const resolved=await h.backend.resolveExternalPersonConflict(first.id);assert.equal(resolved.resolvedIds.length,2);
+  assert.equal(JSON.stringify(h.db.records),serverBefore);assert.equal(JSON.stringify(await h.store.getCachedRecords()),localBefore);
+  const audit=await h.store.getLocal('resolvedPersonOperations',[]);assert.equal(audit.length,2);assert.equal(audit[0].resolvedBy,'audit');assert.equal(audit[0].data.person.origen,'Externo');assert.equal(audit[0].confirmedPerson.origen,'SK Admin');
+  const final=await h.backend.synchronize();assert.equal(final.pending,0);assert.equal(final.issues.length,0);
+  assert.equal(h.db.records.SELLOS.length,1);assert.equal(h.db.records.SELLOS[0].asistentes[0].documento,'101001');assert.equal(h.db.records.SELLOS[0].asistentes[0].origen,'Externo');assert.equal(h.db.records.ANFO[0].serial,555);
+ }
+});
+test('resolver directorio conserva precintos aún pendientes, altas ajenas e inventario completo',async()=>{
+ const h=harness(8);h.setDirectory([internalPerson()]);
+ const selected=await h.store.enqueue('externalUpsert',{person:externalPerson()});
+ const unrelated=await h.store.enqueue('externalUpsert',{person:{...externalPerson(),documento:'202002'}});
+ await h.backend.saveRecord(sealFixture());await h.backend.saveRecord(record(555));
+ await h.store.setLocal('sealExternalPeople',[externalPerson(),{...externalPerson(),documento:'202002'}]);
+ const before=JSON.stringify(await h.store.getCachedRecords()),operations=await h.store.getOperations();
+ await h.backend.resolveExternalPersonConflict(selected.id);
+ const remaining=await h.store.getOperations();assert.equal(remaining.length,3);assert(remaining.some(op=>op.id===unrelated.id));
+ for(const op of operations.filter(op=>op.id!==selected.id))assert.equal(JSON.stringify(remaining.find(row=>row.id===op.id)),JSON.stringify(op));
+ assert.equal(JSON.stringify(await h.store.getCachedRecords()),before);assert.equal((await h.store.getLocal('sealExternalPeople',[])).length,1);
+ assert.equal((await h.store.getLocal('sealInternalPeople',[]))[0].origen,'SK Admin');assert.equal(h.writes,0);
+});
+test('sin comprobación central actual no se consume el alta aunque exista una copia local',async()=>{
+ for(const failure of ['offline','warning','missing','duplicate','wrong-origin','network']){
+  const h=harness(8),op=await h.store.enqueue('externalUpsert',{person:externalPerson()});
+  await h.store.setLocal('sealInternalPeople',[internalPerson()]);h.setDirectory([internalPerson()]);
+  if(failure==='offline')h.context.navigator.onLine=false;
+  if(failure==='warning')h.setDirectory([],'Sin acceso a Personal');
+  if(failure==='missing')h.setDirectory([]);
+  if(failure==='duplicate')h.setDirectory([internalPerson(),{...internalPerson(),nombre:'Otra persona'}]);
+  if(failure==='wrong-origin')h.setDirectory([externalPerson()]);
+  if(failure==='network')h.setIntercept(()=>{throw new Error('network');});
+  await assert.rejects(h.backend.resolveExternalPersonConflict(op.id));
+  assert.equal((await h.store.getOperations())[0].id,op.id);assert.equal((await h.store.getLocal('resolvedPersonOperations',[])).length,0);
+ }
+});
+test('un cambio de sesión durante la comprobación conserva el pendiente',async()=>{
+ const h=harness(8),op=await h.store.enqueue('externalUpsert',{person:externalPerson()});h.setDirectory([internalPerson()]);
+ h.setIntercept((body,reply)=>{const result=reply(body);h.local.set('control_explosivos_token','other');return result;});
+ await assert.rejects(h.backend.resolveExternalPersonConflict(op.id),/sesión cambió/);assert.equal((await h.store.getOperations())[0].id,op.id);
+});
+test('el buscador prioriza Personal de SK Admin frente a una copia externa del mismo documento',async()=>{
+ const h=harness(8);h.setDirectory([internalPerson()]);h.db.externalPeople=[externalPerson(),{...externalPerson(),documento:'202002'}];
+ const result=await h.backend.listSealPeople();assert.equal(result.people.length,2);assert.equal(result.people.find(p=>p.documento==='101001').origen,'SK Admin');
+ h.context.navigator.onLine=false;const offline=await h.backend.listSealPeople();assert.equal(offline.people.length,2);assert.equal(offline.people.find(p=>p.documento==='101001').origen,'SK Admin');
+});
+test('resolver una persona mientras se guardan otros registros conserva todas las escrituras',async()=>{
+ const h=harness(8),op=await h.store.enqueue('externalUpsert',{person:externalPerson()});h.setDirectory([internalPerson()]);
+ const started=deferred(),release=deferred();h.setIntercept(async(body,reply)=>{const result=reply(body);if(body.action==='sealPeople'){started.resolve();await release.promise;}return result;});
+ const resolving=h.backend.resolveExternalPersonConflict(op.id);await started.promise;
+ await h.backend.saveRecord(sealFixture());await h.backend.saveRecord(record(777));release.resolve();await resolving;
+ const pending=await h.store.getOperations();assert.equal(pending.length,2);assert(pending.every(op=>op.action==='create'));
+ const records=await h.store.getCachedRecords();assert.equal(records.ANFO[0].serial,777);assert.equal(records.SELLOS.length,1);
+});
+test('una operación que no sea alta externa no se puede retirar con resolver persona',async()=>{
+ const h=harness(8);h.setDirectory([internalPerson()]);await h.backend.saveRecord(record(777));const op=(await h.store.getOperations())[0];
+ await assert.rejects(h.backend.resolveExternalPersonConflict(op.id),/ya no está disponible/);assert.equal((await h.store.getOperations()).length,1);
 });
 
 (async () => {

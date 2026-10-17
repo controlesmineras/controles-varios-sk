@@ -1,7 +1,7 @@
 import {createDeviceAccess} from "@/lib/device-access";
 const deviceAccess=createDeviceAccess("explosivos");
 import {sealPerson,type SealPerson} from "@/lib/seal-people";
-import {enqueue,getCachedRecords,getOperations,acceptSnapshot,getLocal,setLocal,enqueueCorrection,cancelPendingDeletions} from "@/lib/offline-store";
+import {enqueue,getCachedRecords,getOperations,acceptSnapshot,getLocal,setLocal,enqueueCorrection,cancelPendingDeletions,resolveInternalPersonPending} from "@/lib/offline-store";
 import {operationKeys,operationLabel,validateInventory} from "@/lib/sync-state";
 import type {DeletedRecord,MovementToReverse} from "@/lib/inventory-corrections";
 import type {OfflineOperation,RejectedCorrection} from "@/lib/offline-store";
@@ -54,7 +54,11 @@ export async function login(usuario:string,password:string){
 }
 export async function createInitialAdmin(usuario:string,nombre:string,password:string){const result=await request("bootstrap",{usuario,nombre,password});localStorage.setItem("control_explosivos_token",result.token);localStorage.setItem("control_explosivos_user",JSON.stringify(result.usuario));await deviceAccess.remember(usuario,password,{token:result.token,usuario:result.usuario});return result;}
 export function logout(){localStorage.removeItem("control_explosivos_token");localStorage.removeItem("control_explosivos_user");}
-export type SyncIssue={id:string;label:string;message:string};
+export type SyncIssue={id:string;label:string;message:string;resolution?:"useInternalPerson"};
+function issueFor(operation:OfflineOperation,message:string):SyncIssue{
+ const existingPerson=operation.action==="externalUpsert"&&/documento ya pertenece a Personal de SK Admin/i.test(message);
+ return {id:operation.id,label:operationLabel(operation),message:existingPerson?"Esta persona ya está en Personal de SK Admin. Quedó pendiente su alta como externo en este dispositivo. Pulsa «USAR PERSONA DE SK ADMIN» para comprobarla y resolver ese pendiente. Los precintos registrados se conservan.":message,...(existingPerson?{resolution:"useInternalPerson" as const}:{})};
+}
 function compatibilityError(operation:OfflineOperation,version:number){
  if(operation.action==="deleteRecord")return "La eliminación de seriales está deshabilitada. Este pendiente se conserva para revisión.";
  if(version<8&&["restoreRecord","revertMovement"].includes(operation.action))return "Actualiza el servidor de Explosivos para recuperar o revertir registros.";
@@ -98,7 +102,7 @@ async function runSynchronization(){
   if(status.authenticated!==true)throw new Error("La sesión del servidor venció. Cierra sesión y vuelve a ingresar con internet para sincronizar. Los pendientes se conservan.");
   if(version<3)throw new Error("Actualiza el servidor de Explosivos antes de sincronizar. Los pendientes se conservan.");
   }
-  const report=(operation:OfflineOperation,message:string)=>{operationKeys(operation).forEach(key=>blocked.add(key));issues.push({id:operation.id,label:operationLabel(operation),message});};
+  const report=(operation:OfflineOperation,message:string)=>{operationKeys(operation).forEach(key=>blocked.add(key));issues.push(issueFor(operation,message));};
   async function sendGroup(group:OfflineOperation[]):Promise<void>{
    const eligible:OfflineOperation[]=[];
    for(const operation of group){
@@ -178,9 +182,10 @@ export async function listUsers(){return (await request("usersList")).users;}exp
 
 export async function listSealPeople():Promise<{people:SealPerson[];warning?:string}>{
  let internal=await getLocal<SealPerson[]>("sealInternalPeople",[]),external=await getLocal<SealPerson[]>("sealExternalPeople",[]),warning="";
- if(navigator.onLine){try{const result=await request("sealPeople");if(!result.warning)internal=result.internal;const remote=result.external as SealPerson[];const pending=await getOperations();const queued=pending.filter(op=>op.action==="externalUpsert").map(op=>op.data.person as SealPerson);external=Array.from(new Map([...remote,...queued].map(p=>[p.documento,p])).values());warning=result.warning||"";await setLocal("sealInternalPeople",internal);await setLocal("sealExternalPeople",external);}catch{warning="Directorio sin actualizar: se usan las personas guardadas. Si es la primera consulta, actualiza el servidor de Explosivos.";}}
+ if(navigator.onLine){try{const result=await request("sealPeople");if(!Array.isArray(result.internal)||!Array.isArray(result.external))throw new Error("Directorio incompleto.");if(!result.warning)internal=result.internal;const remote=result.external as SealPerson[];const pending=await getOperations();const queued=pending.filter(op=>op.action==="externalUpsert").map(op=>op.data.person as SealPerson);external=Array.from(new Map([...remote,...queued].map(p=>[p.documento,p])).values());warning=result.warning||"";await setLocal("sealInternalPeople",internal);await setLocal("sealExternalPeople",external);}catch{warning="Directorio sin actualizar: se usan las personas guardadas. Si es la primera consulta, actualiza el servidor de Explosivos.";}}
  else warning="Sin conexión: se usan las personas guardadas en el dispositivo.";
- return {people:[...internal,...external],warning};
+ const documents=new Set(internal.map(person=>person.documento));
+ return {people:[...internal,...external.filter(person=>!documents.has(person.documento))],warning};
 }
 export async function saveExternalPerson(value:SealPerson){const person=sealPerson({...value,origen:"Externo"}),existing=await listSealPeople();if(existing.people.some(p=>p.documento===person.documento&&p.origen==="SK Admin"))throw new Error("Este documento ya pertenece a Personal de SK Admin. Selecciónalo en el buscador.");const rows=await getLocal<SealPerson[]>("sealExternalPeople",[]);await setLocal("sealExternalPeople",[...rows.filter(p=>p.documento!==person.documento),person]);await enqueue("externalUpsert",{person});return person;}
 
@@ -221,5 +226,23 @@ export async function cancelDeletionRequest(tipo:string,id:string){
   const {token,status}=await correctionAccess(false);
   const remote=(await request("list",{},token)).records;validateInventory(remote);
   return cancelPendingDeletions(remote,tipo,id,String(status.usuario.usuario));
+ });
+}
+
+// Verify the exact document against the live directory before resolving the local request.
+export async function resolveExternalPersonConflict(operationId:string){
+ return withSyncLock(async()=>{
+  if(!navigator.onLine)throw new Error("Conéctate a internet para comprobar la persona en SK Admin. El pendiente se conserva.");
+  const token=localStorage.getItem("control_explosivos_token")||"";
+  if(!token)throw new Error("Inicia sesión para comprobar y resolver este pendiente.");
+  const operation=(await getOperations()).find(op=>op.id===operationId);
+  if(!operation||operation.action!=="externalUpsert")throw new Error("Este pendiente ya no está disponible. Pulsa SINCRONIZAR para actualizar la lista.");
+  const document=String((operation.data.person as SealPerson|undefined)?.documento||"").trim();
+  const result=await request("sealPeople",{},token);
+  if(result.warning||!Array.isArray(result.internal))throw new Error("No se pudo comprobar el directorio de SK Admin. El pendiente se conserva. Reintenta con conexión; si persiste, revisa el acceso del servidor a Personal.");
+  const matches=(result.internal as SealPerson[]).filter(person=>person&&String(person.documento||"").trim()===document);
+  if(!document||matches.length!==1||matches[0].origen!=="SK Admin"||!matches[0].nombre?.trim())throw new Error(`No se encontró una única persona válida con el documento ${document||"del pendiente"} en SK Admin. Revisa ese documento en Personal y vuelve a intentarlo. El pendiente se conserva.`);
+  const user=JSON.parse(localStorage.getItem("control_explosivos_user")||"{}");
+  return resolveInternalPersonPending(operationId,{...matches[0],documento:document},String(user.usuario||""));
  });
 }

@@ -73,6 +73,8 @@ export function operationLabel(operation: OfflineOperation): string {
   const data = operation.data;
   const record = data.record as Record<string, unknown> | undefined;
   const batch = data.batch as Record<string, unknown> | undefined;
+  const person = data.person as {documento?: string; nombre?: string} | undefined;
+  if (person) return `${person.nombre || "Persona"} · Documento ${person.documento || "no informado"}`;
   return `${record?.tipo || batch?.tipo || data.tipo || "Directorio"} · ${record?.serial || record?.cajaNumero || data.id || operation.id.slice(0, 8)}`;
 }
 

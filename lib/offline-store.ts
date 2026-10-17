@@ -1,4 +1,5 @@
 import { materialTypes, operationKeys, overlayPending, validateInventory, type Inventory } from './sync-state';
+import type { SealPerson } from './seal-people';
 export type OfflineOperation = { id: string; action: string; data: Record<string, unknown>; createdAt: string };
 export type RejectedCorrection = OfflineOperation & { rejectedAt: string; message: string };
 const DB = 'control-explosivos-local', VERSION = 1, STORE = 'data';
@@ -111,6 +112,34 @@ export function cancelPendingDeletions(remote: Inventory, tipo: string, id: stri
     const remaining = operations.filter(op => !matching(op));
     const records = overlayPending(remote, remaining);
     return { records, operations: remaining, cancelled, result: { cancelled: cancelled.length, present: !!remote[tipo]?.some(row => String(row.id) === id) } };
+  });
+}
+
+// Resolve only redundant directory requests. Inventory and seal snapshots are untouched.
+export async function resolveInternalPersonPending(operationId: string, person: SealPerson, user: string) {
+  const db = await open();
+  return new Promise<{ resolvedIds: string[]; person: SealPerson }>((resolve, reject) => {
+    const tx = db.transaction(STORE, 'readwrite'), store = tx.objectStore(STORE);
+    const internal = store.get('sealInternalPeople'), external = store.get('sealExternalPeople');
+    const audit = store.get('resolvedPersonOperations'), operations = store.get('operations');
+    let result: { resolvedIds: string[]; person: SealPerson }, failure: unknown;
+    operations.onsuccess = () => {
+      try {
+        const pending: OfflineOperation[] = operations.result || [];
+        const selected = pending.find(op => op.id === operationId);
+        const document = String((selected?.data.person as SealPerson | undefined)?.documento || '').trim();
+        if (selected?.action !== 'externalUpsert' || !document || document !== person.documento || person.origen !== 'SK Admin' || !person.nombre?.trim()) throw new Error('El pendiente cambió. Sincroniza y vuelve a seleccionar la persona.');
+        const matching = (op: OfflineOperation) => op.action === 'externalUpsert' && String((op.data.person as SealPerson | undefined)?.documento || '').trim() === document;
+        const resolved = pending.filter(matching).map(op => ({ ...op, resolvedAt: new Date().toISOString(), resolvedBy: user, resolution: 'Usar persona de SK Admin', confirmedPerson: person }));
+        store.put(pending.filter(op => !matching(op)), 'operations');
+        store.put([...(internal.result || []).filter((p: SealPerson) => p.documento !== document), person], 'sealInternalPeople');
+        store.put((external.result || []).filter((p: SealPerson) => p.documento !== document), 'sealExternalPeople');
+        store.put([...(audit.result || []), ...resolved], 'resolvedPersonOperations');
+        result = { resolvedIds: resolved.map(op => op.id), person };
+      } catch (error) { failure = error; tx.abort(); }
+    };
+    tx.oncomplete = () => { db.close(); resolve(result); };
+    tx.onabort = () => { db.close(); reject(failure || tx.error || new Error('No se pudo resolver el pendiente en este dispositivo.')); };
   });
 }
 
