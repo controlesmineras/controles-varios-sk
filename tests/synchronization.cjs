@@ -84,8 +84,56 @@ test('27 pendientes: un duplicado se conserva y los otros 26 llegan', async () =
   assert.equal(result.pending, 1); assert.equal(result.issues.length, 1);
   assert.match(result.issues[0].message, /Ya existe/);
   assert.equal(h.db.records.ANFO.length, 27);
+  assert.equal(result.records.ANFO.length, 27, 'Un alta rechazada por serial duplicado no debe inflar las existencias locales');
   assert.equal((await h.store.getOperations()).length, 1);
   assert.equal(await h.store.getLocal('lastSync', ''), '', 'A partial pass is not a successful full sync');
+});
+
+test('Indugel borrado y reingresado se traslada una sola vez con su nuevo ID', async () => {
+  const h = harness(8);
+  const old = { ...record(30288), tipo: 'INDUGEL', id: 'old-deleted-id', verificado: true, movimientos: [] };
+  h.db.deletedRecords.push({ tipo: 'INDUGEL', registro: old, fechaEliminacion: '2026-10-19T12:00:00.000Z' });
+  const saved = await h.backend.saveRecord({ ...record(30288), tipo: 'INDUGEL' });
+  assert.notEqual(saved.id, old.id);
+  await h.backend.moveRecord('INDUGEL', saved.id, 'Polvorín interior de mina', '2026-10-20T13:00:00.000Z');
+  const result = await h.backend.synchronize();
+  assert.equal(result.pending, 0);
+  assert.equal(result.records.INDUGEL.length, 1);
+  assert.equal(result.records.INDUGEL[0].ubicacion, 'Polvorín interior de mina');
+  assert.equal(result.records.INDUGEL[0].movimientos.length, 1);
+  assert.equal(h.db.deletedRecords.length, 1, 'La copia eliminada permanece archivada, fuera de las existencias');
+});
+
+test('Indugel con el mismo serial y distinto ID pendiente no duplica ni traslada el registro central', async () => {
+  const h = harness(8);
+  const remote = { ...record(30288), tipo: 'INDUGEL', id: 'central-id', verificado: true, movimientos: [] };
+  h.db.records.INDUGEL.push(remote);
+  // El dispositivo aún no había descargado el registro central.
+  const saved = await h.backend.saveRecord({ ...record('30288'), tipo: 'INDUGEL' });
+  await h.backend.moveRecord('INDUGEL', saved.id, 'Polvorín interior de mina', '2026-10-20T13:00:00.000Z');
+  const before = JSON.stringify(await h.store.getOperations());
+  const result = await h.backend.synchronize();
+  assert.equal(result.pending, 2);
+  assert.equal(result.issues.length, 2);
+  assert.equal(result.records.INDUGEL.length, 1, 'Un solo serial físico, aunque existan dos IDs');
+  assert.equal(result.records.INDUGEL[0].id, 'central-id');
+  assert.equal(result.records.INDUGEL[0].ubicacion, 'Polvorín superficie', 'No reasignar automáticamente un movimiento del ID rechazado');
+  assert.equal(result.records.INDUGEL[0].movimientos.length, 0);
+  assert.equal(JSON.stringify(await h.store.getOperations()), before, 'Conservar íntegros ingreso y traslado pendientes para revisión');
+  assert.equal((await h.backend.synchronize()).records.INDUGEL.length, 1, 'Un reintento tampoco aumenta el conteo');
+});
+
+test('un traslado del ID eliminado no se aplica al reingreso del mismo serial', async () => {
+  const h = harness(8);
+  const saved = await h.backend.saveRecord({ ...record(30288), tipo: 'INDUGEL' });
+  await h.backend.synchronize();
+  await h.store.enqueue('move', { tipo: 'INDUGEL', id: 'old-deleted-id', ubicacion: 'Polvorín interior de mina', fechaMovimiento: '2026-10-20T13:00:00.000Z' });
+  const result = await h.backend.synchronize();
+  assert.equal(result.pending, 1);
+  assert.match(result.issues[0].message, /Registro no encontrado/);
+  assert.equal(result.records.INDUGEL.length, 1);
+  assert.equal(result.records.INDUGEL[0].id, saved.id);
+  assert.equal(result.records.INDUGEL[0].ubicacion, 'Polvorín superficie');
 });
 
 test('un cambio dependiente espera al registro rechazado', async () => {
@@ -208,6 +256,28 @@ test('superposición conserva cambios y no oculta seriales por eliminaciones pau
   assert.equal(result.ANFO[0].ubicacion, 'Polvorín interior de mina');
   assert.equal(h.state.overlayPending(result, pending).ANFO[0].movimientos.length, 1);
   assert.equal(remote.ANFO.length, 2, 'The server snapshot is not mutated');
+});
+
+test('conteo por serial/caja conserva entradas únicas, categorías, precintos y operaciones originales', () => {
+  const h = harness(), remote = blank();
+  remote.INDUGEL = [{ id: 'i-central', serial: 30288, ubicacion: 'Polvorín superficie' }];
+  remote.DETONADORES = [{ id: 'd-central', cajaNumero: 'A-01' }];
+  remote['MECHA DE SEGURIDAD'] = [{ id: 'm-central', cajaNumero: 'M-01' }];
+  remote.SELLOS = [{ id: 's-central', selloIndugel: '88' }];
+  const pending = [
+    { action: 'createBatch', data: { batch: { tipo: 'INDUGEL', items: [{ id: 'duplicate', serial: '030288' }, { id: 'new', serial: 30289 }] } } },
+    { action: 'create', data: { record: { tipo: 'ANFO', id: 'a-new', serial: 30288 } } },
+    { action: 'create', data: { record: { tipo: 'DETONADORES', id: 'd-duplicate', cajaNumero: ' A-01 ' } } },
+    { action: 'create', data: { record: { tipo: 'MECHA DE SEGURIDAD', id: 'm-duplicate', cajaNumero: 'M-01' } } },
+    { action: 'create', data: { record: { tipo: 'SELLOS', id: 's-new', selloIndugel: '88' } } },
+  ].map((operation, index) => ({ ...operation, id: String(index), createdAt: '2026-10-20T13:00:00.000Z' }));
+  const before = JSON.stringify({remote, pending});
+  const result = h.state.overlayPending(remote, pending);
+  assert.equal(result.INDUGEL.length, 2); assert.equal(result.ANFO.length, 1);
+  assert.equal(result.DETONADORES.length, 1); assert.equal(result['MECHA DE SEGURIDAD'].length, 1);
+  assert.equal(result.SELLOS.length, 2, 'El historial de precintos no se deduplica por su número');
+  assert.equal(result.INDUGEL.find(row => row.serial === 30288).id, 'i-central');
+  assert.equal(JSON.stringify({remote, pending}), before, 'Ni el inventario central ni la cola se modifican');
 });
 
 test('27 pendientes válidos requieren 2 solicitudes y una escritura central', async () => {

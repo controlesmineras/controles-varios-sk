@@ -36,7 +36,17 @@ export function operationKeys(operation: OfflineOperation): string[] {
   const person = data.person as { documento?: string } | undefined;
   return person ? [`person:${person.documento}`] : [];
 }
-// Server inventory plus all unconfirmed changes; existing IDs are never duplicated.
+function inventoryIdentity(type: string, item: Record<string, unknown>): string | null {
+  if (type === "INDUGEL" || type === "ANFO") {
+    const serial = String(item.serial ?? "").trim();
+    // Serial inputs are numeric on the server, including values entered as text.
+    return serial && Number.isFinite(Number(serial)) ? String(Number(serial)) : null;
+  }
+  if (type === "MECHA DE SEGURIDAD" || type === "DETONADORES") return String(item.cajaNumero ?? "").trim() || null;
+  return null; // Repeated seal numbers may legitimately appear in different events.
+}
+// Server inventory plus unconfirmed changes. A pending copy of an existing serial
+// is retained in the operation queue, but must not count as another physical unit.
 export function overlayPending(remote: Inventory, pending: OfflineOperation[]): Inventory {
   const records = structuredClone(remote);
   for (const type of materialTypes) records[type] ||= [];
@@ -48,7 +58,11 @@ export function overlayPending(remote: Inventory, pending: OfflineOperation[]): 
       const type = String(batch?.tipo || items[0]?.tipo || "");
       if (!records[type]) continue;
       for (const item of [...items].reverse()) {
-        if (item && !records[type].some(row => String(row.id) === String(item.id))) records[type].unshift(structuredClone(item));
+        if (!item) continue;
+        const identity = inventoryIdentity(type, item);
+        if (records[type].some(row => String(row.id) === String(item.id) || (identity !== null && inventoryIdentity(type, row) === identity))) continue;
+        // Never merge IDs or replay the skipped copy's movements on the server row.
+        records[type].unshift(structuredClone(item));
       }
     } else if (operation.action === "deleteRecord") {
       // Historical deletion requests are paused. Do not hide a serial still on the server.

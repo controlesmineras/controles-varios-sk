@@ -57,6 +57,8 @@ export function logout(){localStorage.removeItem("control_explosivos_token");loc
 export type SyncIssue={id:string;label:string;message:string;resolution?:"useInternalPerson"};
 function issueFor(operation:OfflineOperation,message:string):SyncIssue{
  const existingPerson=operation.action==="externalUpsert"&&/documento ya pertenece a Personal de SK Admin/i.test(message);
+ const duplicateEntry=["create","createBatch"].includes(operation.action)&&/Ya existe un registro con ese serial o número de caja/i.test(message);
+ if(duplicateEntry)message+=" El ingreso pendiente se conserva para revisión. Los seriales o cajas que ya existen no se suman de nuevo al inventario; sus movimientos pendientes no se aplican a otro registro.";
  return {id:operation.id,label:operationLabel(operation),message:existingPerson?"Esta persona ya está en Personal de SK Admin. Quedó pendiente su alta como externo en este dispositivo. Pulsa «USAR PERSONA DE SK ADMIN» para comprobarla y resolver ese pendiente. Los precintos registrados se conservan.":message,...(existingPerson?{resolution:"useInternalPerson" as const}:{})};
 }
 function compatibilityError(operation:OfflineOperation,version:number){

@@ -38,6 +38,12 @@ Los errores de permisos, sesión, datos o confirmaciones inválidas conservan lo
 
 Estas mejoras del cliente no requieren actualizar Apps Script. La sincronización central en lotes de 50 sigue requiriendo API 7, según `apps-script/README.md`; las versiones anteriores conservan su protocolo compatible.
 
+### Conteo de ingresos repetidos pendientes
+
+Al recibir el inventario central, una copia local pendiente con el mismo serial (Indugel/ANFO) o número de caja (mecha/detonadores) y distinto ID no se suma como otra unidad. Se conserva el registro central con su ubicación e historial. El ingreso y los movimientos rechazados permanecen íntegros en pendientes con su aviso para revisión; no se borran, no se confirman automáticamente y no se trasladan a otro ID.
+
+Un serial eliminado y reingresado correctamente conserva su nuevo ID; el archivo de eliminaciones no forma parte de las existencias. La tarjeta cuenta ingresos verificados y alterna cajas/barras en Indugel (154 barras por caja); la lista también puede incluir ingresos sin verificar según sus filtros. Este ajuste del conteo no requiere actualizar `Code.gs`.
+
 ## Verificación
 
 Las pruebas usan datos simulados y no acceden al inventario de la empresa:
