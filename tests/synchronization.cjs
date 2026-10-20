@@ -23,6 +23,7 @@ function harness(version = 7, role = "ADMINISTRADOR") {
   let intercept = null;
   const defaultReply = body => {
     if (body.action === 'status') return { ok: true, apiVersion: version, authenticated: true, usuario: { usuario: 'audit', rol: role } };
+    if (body.action === 'deleteRecordConfirmed') { try { return server.deleteRecordConfirmed_(body); } catch (error) { return {ok:false,error:error.message}; } }
     if (body.action === 'deletedRecordsList') { try { return server.deletedRecordsList_({usuario:'audit',rol:role}); } catch (error) { return {ok:false,error:error.message}; } }
     if (body.action === 'sealPeople') return server.sealPeople_();
     if (body.action === 'list') return { ok: true, records: clone(db.records) };
@@ -667,6 +668,155 @@ test('resolver una persona mientras se guardan otros registros conserva todas la
 test('una operación que no sea alta externa no se puede retirar con resolver persona',async()=>{
  const h=harness(8);h.setDirectory([internalPerson()]);await h.backend.saveRecord(record(777));const op=(await h.store.getOperations())[0];
  await assert.rejects(h.backend.resolveExternalPersonConflict(op.id),/ya no está disponible/);assert.equal((await h.store.getOperations()).length,1);
+});
+
+function confirmedDeletionFixture(role='ADMINISTRADOR') {
+ const h=harness(9,role);
+ const password='Solo-pruebas-123';
+ h.server.hash_=value=>require('node:crypto').createHash('sha256').update(value).digest('hex');
+ h.db.users.push({usuario:'audit',nombre:'Audit',rol:role,activo:true,salt:'test-salt',hash:h.server.hash_('test-salt'+password)});
+ h.db.sessions.push({usuario:'audit',tokenHash:h.server.hash_('token'),vence:new Date(Date.now()+3600000).toISOString()});
+ const item={...record(101),id:'delete-target',movimientos:[{fecha:'2026-10-19T10:00:00.000Z',origen:'Polvorín interior de mina',destino:'Polvorín superficie',usuario:'audit'}]};
+ h.db.records.ANFO.push(clone(item),{...record(102),id:'keep-other'});
+ return {h,password,item,body:{token:'token',password,confirmed:true,tipo:'ANFO',id:item.id,operationId:'confirm-test',expectedRecord:clone(item)}};
+}
+
+test('eliminar con contraseña retira solo el material y su historial, actualiza cache y conserva recibo mínimo',async()=>{
+ const {h,password,item}=confirmedDeletionFixture();
+ h.db.deletedRecords.push({tipo:'ANFO',registro:clone(item),fechaEliminacion:'old',restaurado:{usuario:'audit'}});
+ h.db.deletedRecords.push({tipo:'ANFO',registro:{...item,id:'unrelated-archive'},fechaEliminacion:'other'});
+ await h.store.acceptSnapshot(h.db.records);
+ const result=await h.backend.deleteRecordConfirmed('ANFO',item,password,'confirmed-ui');
+ assert.equal(h.db.records.ANFO.length,1);assert.equal(h.db.records.ANFO[0].id,'keep-other');
+ assert.equal(result.records.ANFO.length,1);assert.equal((await h.store.getCachedRecords()).ANFO.length,1);
+ assert.equal(h.db.deletedRecords.length,1);assert.equal(h.db.deletedRecords[0].registro.id,'unrelated-archive');
+ assert.deepEqual(Object.keys(h.db.confirmedDeletions[0]).sort(),['fecha','id','operationId','tipo','usuario']);
+ assert.equal((await h.store.getOperations()).length,0);assert(h.events.includes('explosivos-sync-progress'));
+ assert(!JSON.stringify(h.db).includes(password));assert(!JSON.stringify([...h.local]).includes(password));
+ assert(!JSON.stringify(await h.store.getLocal('records',{})).includes(password));
+});
+
+test('contraseña incorrecta o de otro administrador no cambia inventario, archivos ni recibos',async()=>{
+ const {h,item}=confirmedDeletionFixture();
+ h.db.users.push({usuario:'other',rol:'ADMINISTRADOR',activo:true,salt:'other',hash:h.server.hash_('otherOtra-clave-456')});
+ const before=JSON.stringify(h.db);
+ for(const password of ['incorrecta','Otra-clave-456'])await assert.rejects(h.backend.deleteRecordConfirmed('ANFO',item,password,'wrong'),/Contraseña incorrecta/);
+ assert.equal(JSON.stringify(h.db),before);assert.equal(h.writes,0);assert.equal((await h.store.getOperations()).length,0);
+});
+
+test('operador no puede eliminar por cliente ni llamando directamente al servidor',async()=>{
+ const {h,item,password,body}=confirmedDeletionFixture('OPERADOR');const before=JSON.stringify(h.db);
+ await assert.rejects(h.backend.deleteRecordConfirmed('ANFO',item,password,'operator'),/requiere rol administrador/);
+ assert.throws(()=>h.server.deleteRecordConfirmed_(body),/requiere rol administrador/);
+ assert.equal(JSON.stringify(h.db),before);assert.equal(h.calls.filter(c=>c.action==='deleteRecordConfirmed').length,0);
+});
+
+test('servidor valida sesión vigente, usuario activo y rol actual dentro de la eliminación',async()=>{
+ for(const change of [h=>h.db.sessions[0].vence='2020-01-01',h=>h.db.users[0].activo=false,h=>h.db.users[0].rol='OPERADOR']){
+  const {h,item,password}=confirmedDeletionFixture();
+  h.setIntercept((body,reply)=>{if(body.action==='deleteRecordConfirmed')change(h);return reply(body);});
+  await assert.rejects(h.backend.deleteRecordConfirmed('ANFO',item,password,'stale-session'),/venció|activo|administrador/);
+  assert.equal(h.db.records.ANFO.length,2);assert.equal(h.writes,0);
+ }
+});
+
+test('sin aceptar advertencia, sin contraseña, sin ID o con tipo inválido no hay borrado',()=>{
+ for(const override of [{confirmed:false},{password:''},{operationId:''},{tipo:'SELLOS'},{tipo:'__proto__'}]){
+  const {h,body}=confirmedDeletionFixture();const before=JSON.stringify(h.db);
+  assert.throws(()=>h.server.deleteRecordConfirmed_({...body,...override}));assert.equal(JSON.stringify(h.db),before);
+ }
+});
+
+test('no elimina un material que cambió desde que se abrió la advertencia',async()=>{
+ const {h,item,password}=confirmedDeletionFixture();h.db.records.ANFO[0].ubicacion='Polvorín interior de mina';
+ await assert.rejects(h.backend.deleteRecordConfirmed('ANFO',item,password,'changed'),/registro cambió/);
+ assert.equal(h.db.records.ANFO.length,2);assert.equal(h.writes,0);
+});
+
+test('la comparación admite distinto orden de claves y el campo tipo local',()=>{
+ const {h,body}=confirmedDeletionFixture();delete h.db.records.ANFO[0].tipo;
+ body.expectedRecord=Object.fromEntries(Object.entries(body.expectedRecord).reverse());
+ assert.equal(h.server.deleteRecordConfirmed_(body).ok,true);assert.equal(h.db.records.ANFO.length,1);
+});
+
+test('sin conexión o servidor anterior no envía ni encola la eliminación',async()=>{
+ for(const mode of ['offline','old']){
+  const {h,item,password}=confirmedDeletionFixture();
+  if(mode==='offline')h.context.navigator.onLine=false;
+  else h.setIntercept((body,reply)=>body.action==='status'?{...reply(body),apiVersion:8}:reply(body));
+  await assert.rejects(h.backend.deleteRecordConfirmed('ANFO',item,password,mode),/internet|Code.gs/);
+  assert.equal(h.calls.filter(c=>c.action==='deleteRecordConfirmed').length,0);assert.equal((await h.store.getOperations()).length,0);
+ }
+});
+
+test('pendientes del ID o del mismo serial con otro ID bloquean el borrado',async()=>{
+ for(const action of ['move','deleteRecord','create','createBatch']){
+  const {h,item,password}=confirmedDeletionFixture();await h.store.acceptSnapshot(h.db.records);
+  const data=action==='create'?{record:{...item,id:'pending-duplicate'}}:action==='createBatch'?{batch:{tipo:'ANFO',items:[{...item,id:'batch-duplicate'}]}}:{tipo:'ANFO',id:item.id,ubicacion:'Polvorín interior de mina',fechaMovimiento:'2026-10-20T15:00:00.000Z'};
+  await h.store.enqueue(action,data);const before=JSON.stringify(await h.store.getOperations());
+  await assert.rejects(h.backend.deleteRecordConfirmed('ANFO',item,password,action),/cambios pendientes/);
+  assert.equal(h.calls.filter(c=>c.action==='deleteRecordConfirmed').length,0);assert.equal(JSON.stringify(await h.store.getOperations()),before);
+ }
+});
+
+test('pendiente de otro material se conserva y no impide eliminar el seleccionado',async()=>{
+ const {h,item,password}=confirmedDeletionFixture();await h.store.acceptSnapshot(h.db.records);
+ await h.backend.moveRecord('ANFO','keep-other','Polvorín interior de mina','2026-10-20T15:00:00.000Z');
+ await h.backend.deleteRecordConfirmed('ANFO',item,password,'other-pending');
+ assert.equal((await h.store.getOperations()).length,1);assert.equal((await h.store.getCachedRecords()).ANFO[0].ubicacion,'Polvorín interior de mina');
+});
+
+test('respuesta perdida no encola ni reintenta; mismo recibo confirma sin borrar un reingreso',async()=>{
+ const {h,item,password}=confirmedDeletionFixture();await h.store.acceptSnapshot(h.db.records);
+ h.setIntercept((body,reply)=>{const result=reply(body);if(body.action==='deleteRecordConfirmed')throw new Error('Lost response');return result;});
+ await assert.rejects(h.backend.deleteRecordConfirmed('ANFO',item,password,'lost-response'),/SINCRONIZAR.*No se guardó/);
+ assert.equal(h.db.records.ANFO.length,1);assert.equal(h.calls.filter(c=>c.action==='deleteRecordConfirmed').length,1);
+ assert.equal((await h.store.getOperations()).length,0);assert.equal((await h.store.getCachedRecords()).ANFO.length,2);
+ h.setIntercept(null);h.db.records.ANFO.push({...item,id:'new-id-same-serial'});
+ await h.backend.deleteRecordConfirmed('ANFO',item,password,'lost-response');
+ assert.equal(h.db.records.ANFO.length,2);assert.equal(h.db.confirmedDeletions.length,1);
+ assert.equal((await h.store.getCachedRecords()).ANFO.some(row=>row.id===item.id),false);
+});
+
+test('no reutiliza la confirmación para otro objetivo ni otro usuario',()=>{
+ const {h,body}=confirmedDeletionFixture();h.server.deleteRecordConfirmed_(body);
+ assert.throws(()=>h.server.deleteRecordConfirmed_({...body,id:'keep-other'}),/otra eliminación/);
+ h.db.users.push({...h.db.users[0],usuario:'other'});h.db.sessions[0].usuario='other';
+ assert.throws(()=>h.server.deleteRecordConfirmed_(body),/otra eliminación/);assert.equal(h.db.records.ANFO.length,1);
+});
+
+test('fallo de almacenamiento no produce eliminación ni recibo de éxito',async()=>{
+ const {h,item,password}=confirmedDeletionFixture();const before=JSON.stringify(h.db);h.failWrite();
+ await assert.rejects(h.backend.deleteRecordConfirmed('ANFO',item,password,'save-fails'),/Drive no disponible/);
+ assert.equal(JSON.stringify(h.db),before);assert.equal((await h.store.getOperations()).length,0);
+});
+
+test('recibo incompleto no quita el registro del dispositivo ni muestra éxito',async()=>{
+ const {h,item,password}=confirmedDeletionFixture();await h.store.acceptSnapshot(h.db.records);
+ h.setIntercept((body,reply)=>body.action==='deleteRecordConfirmed'?{ok:true,records:blank()}:reply(body));
+ await assert.rejects(h.backend.deleteRecordConfirmed('ANFO',item,password,'bad-receipt'),/No se pudo confirmar/);
+ assert.equal((await h.store.getCachedRecords()).ANFO.length,2);
+});
+
+test('eliminación confirmada no se admite en cola y los borrados antiguos siguen bloqueados',()=>{
+ const {h,body}=confirmedDeletionFixture();
+ const result=h.server.sync_([{id:'queued-delete',action:'deleteRecordConfirmed',data:body},{id:'old-delete',action:'deleteRecord',data:{tipo:'ANFO',id:body.id}}],{usuario:'audit',rol:'ADMINISTRADOR'},'explosivos-receipts-v1');
+ assert.equal(result.processed.length,0);assert.equal(result.rejected.length,2);assert.equal(h.db.records.ANFO.length,2);
+});
+
+test('un cliente antiguo no puede recrear el ID eliminado; un nuevo ingreso con otro ID sí',()=>{
+ const {h,body,item}=confirmedDeletionFixture();h.server.deleteRecordConfirmed_(body);
+ assert.throws(()=>h.server.create_(item,'audit','new-op'),/eliminado definitivamente/);
+ assert.throws(()=>h.server.createBatch_({tipo:'ANFO',rangos:[{desde:101,hasta:101}],items:[item],fechaFabricacion:item.fechaFabricacion,fechaVencimiento:item.fechaVencimiento,fechaIngreso:item.fechaIngreso,ubicacion:item.ubicacion},'audit','new-batch'),/eliminado definitivamente/);
+ h.server.create_({...item,id:'fresh-id'},'audit','fresh-op');assert.equal(h.db.records.ANFO.length,2);
+});
+
+test('eliminar espera a una sincronización en curso y rechaza una revisión que quedó desactualizada',async()=>{
+ const {h,item,password}=confirmedDeletionFixture();const started=deferred(),release=deferred();
+ h.setIntercept(async(body,reply)=>{if(body.action==='list'){started.resolve();await release.promise;h.db.records.ANFO[0].fechaVencimiento='2028-01-01';}return reply(body);});
+ const syncing=h.backend.synchronize();await started.promise;
+ const deleting=h.backend.deleteRecordConfirmed('ANFO',item,password,'wait-sync');release.resolve();await syncing;
+ await assert.rejects(deleting,/registro cambió/);assert.equal(h.db.records.ANFO.length,2);
 });
 
 (async () => {

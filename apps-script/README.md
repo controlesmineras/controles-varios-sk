@@ -42,6 +42,20 @@ Después, recargar la app y entrar como administrador a **REVERTIR / RECUPERAR**
 
 Las correcciones requieren conexión y no se muestran como aplicadas hasta recibir confirmación central. Un reintento usa el mismo ID de operación. Las solicitudes que el servidor rechaza expresamente se guardan en la auditoría local de correcciones rechazadas, en lugar de reintentarse automáticamente sobre datos que ya cambiaron. Una interrupción de red conserva la solicitud pendiente para confirmar su resultado.
 
-La eliminación de seriales se deshabilita también en el servidor, por lo que clientes anteriores no pueden seguir retirándolos. Las solicitudes antiguas permanecen pausadas en la app hasta cancelarlas; un registro todavía presente en el servidor vuelve a mostrarse al sincronizar.
+La ruta antigua de eliminación de seriales se deshabilita también en el servidor, por lo que clientes anteriores no pueden seguir retirándolos. Las solicitudes antiguas permanecen pausadas en la app hasta cancelarlas; un registro todavía presente en el servidor vuelve a mostrarse al sincronizar.
 
 La recuperación depende de que el registro exista en `deletedRecords`; las versiones anteriores conservaban hasta 5.000 copias. Esta actualización no declara recuperados los datos reales ni restaura entradas automáticamente. Verificar el serial, la ubicación y los totales después de cada recuperación.
+
+## Eliminación confirmada por administrador (API 9)
+
+Actualizar `Code.gs` en el proyecto existente y publicar **Implementar → Administrar implementaciones → Editar → Nueva versión → Implementar**, conservando la misma URL `/exec`. La publicación en GitHub Pages actualiza la interfaz, pero no publica este servidor de Google Apps Script. No crear otra base ni restablecer usuarios.
+
+Cada material tiene **ELIMINAR**, visible solo para administradores y fuera de una revista activa. El aviso es: «Esta acción borrará el serial del material y su trazabilidad en la app. ¿Deseas continuar?». **CANCELAR** cierra sin guardar ni enviar una eliminación. **CONTINUAR** muestra el campo de contraseña; **ELIMINAR** valida la contraseña del administrador de la sesión actual en el servidor antes de borrar.
+
+La acción requiere conexión. El servidor vuelve a comprobar sesión, cuenta activa, rol y contraseña dentro del bloqueo de escritura. Si el registro cambió desde que se abrió el aviso, se exige sincronizar y revisar de nuevo. Un servidor anterior a API 9 mantiene el borrado bloqueado con una indicación de actualización. Los pendientes locales del material deben resolverse primero.
+
+Se elimina únicamente el ID y tipo seleccionados, con sus movimientos y copias archivadas de ese mismo ID. Las eliminaciones nuevas son definitivas y no aparecen en **RECUPERAR**. Se conserva un recibo mínimo de eliminación (ID interno, tipo, usuario, fecha e ID de operación), sin serial, historial ni contraseña. Este recibo impide repetir el borrado sobre otro elemento y evita que un cliente antiguo recree el mismo ID. Se permite un nuevo ingreso deliberado con otro ID.
+
+La contraseña no se almacena ni entra en la cola de sincronización. La ruta antigua `deleteRecord` sigue bloqueada, incluso si proviene de clientes anteriores; la nueva `deleteRecordConfirmed` solo admite llamadas directas en línea. Si se pierde la respuesta, la app no reintenta automáticamente ni declara éxito: indica **SINCRONIZAR** para verificar el resultado. Un reintento manual del mismo diálogo usa el mismo recibo.
+
+Validación con datos ficticios: `node tests/synchronization.cjs` incluye contraseña incorrecta, cuenta ajena, operador, sesión vencida, cambio de rol, registro desactualizado, pérdida de respuesta, idempotencia, pendientes y fallo de escritura. No se eliminan registros reales como parte de las pruebas.

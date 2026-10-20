@@ -179,6 +179,39 @@ export async function saveBatchRecords(batch:Record<string,any>){const type=Stri
 export async function verifyBatchRecords(tipo:string,unidades:Array<Record<string,unknown>>){const ids=new Set(unidades.map(unit=>String(unit.id)));await enqueue("verifyBatch",{tipo,unidades},records=>records[tipo].forEach(item=>{if(ids.has(String(item.id))){const unit=unidades.find(value=>String(value.id)===String(item.id))!;item.fechaFabricacion=unit.fechaFabricacion;item.fechaVencimiento=unit.fechaVencimiento;item.verificado=true;item.fechaVerificacion=new Date().toISOString();}}));return {ok:true,cantidad:unidades.length,local:true};}
 export async function moveRecord(tipo:string,id:string,ubicacion:string,fechaMovimiento:string){if(!Number.isFinite(Date.parse(fechaMovimiento)))throw new Error("La fecha y hora del movimiento no son válidas.");await enqueue("move",{tipo,id,ubicacion,fechaMovimiento},records=>{const item=records[tipo].find(value=>String(value.id)===id);if(!item)throw new Error("Registro no encontrado.");const origen=item.ubicacion;item.ubicacion=ubicacion;const movements=(item.movimientos as Array<Record<string,unknown>>)||[];movements.unshift({fecha:fechaMovimiento,origen,destino:ubicacion});item.movimientos=movements;});return {ok:true,local:true};}
 export async function deleteRecord(_tipo:string,_id:string){throw new Error("La eliminación de seriales está deshabilitada. Usa las opciones de corrección del inventario.");}
+// Intentionally separate from the offline queue and the legacy delete API.
+export async function deleteRecordConfirmed(tipo:string,record:Record<string,unknown>,password:string,operationId:string){
+ const token=localStorage.getItem("control_explosivos_token")||"";
+ return withSyncLock(async()=>{
+  if(!navigator.onLine)throw new Error("Conéctate a internet para eliminar. Esta acción no se guarda como pendiente.");
+  if(!token||localStorage.getItem("control_explosivos_token")!==token)throw new Error("La sesión cambió. Inicia sesión y vuelve a revisar el registro.");
+  if(!password.trim())throw new Error("Ingresa tu contraseña de acceso a la app.");
+  if(!operationId||!["INDUGEL","ANFO","MECHA DE SEGURIDAD","DETONADORES"].includes(tipo)||!record.id)throw new Error("Selecciona un material válido para eliminar.");
+  const status=await request("status",{},token);
+  if(!status.authenticated)throw new Error("Inicia sesión nuevamente para eliminar.");
+  if(status.usuario?.rol!=="ADMINISTRADOR")throw new Error("Esta operación requiere rol administrador.");
+  if(Number(status.apiVersion||0)<9)throw new Error("Actualiza Code.gs y publica una nueva versión del servidor para habilitar la eliminación con contraseña.");
+  const id=String(record.id),identity=(item:Record<string,unknown>)=>tipo==="ANFO"||tipo==="INDUGEL"?String(Number(item.serial)):String(item.cajaNumero);
+  const pending=(await getOperations()).some(op=>{
+   if(operationKeys(op).includes(`${tipo}:${id}`))return true;
+   const item=op.data.record as Record<string,unknown>|undefined;
+   const batch=op.data.batch as {tipo:string;items?:Array<Record<string,unknown>>}|undefined;
+   return Boolean(item&&item.tipo===tipo&&identity(item)===identity(record))||Boolean(batch?.tipo===tipo&&batch.items?.some(row=>identity(row)===identity(record)));
+  });
+  if(pending)throw new Error("Este material tiene cambios pendientes en el dispositivo. Sincronízalos o revisa y cancela su solicitud antigua en REVERTIR / RECUPERAR antes de eliminar.");
+  try{
+   const result=await request("deleteRecordConfirmed",{tipo,id,password,operationId,confirmed:true,expectedRecord:record},token);
+   validateInventory(result.records);
+   if(result.deleted?.tipo!==tipo||result.deleted?.id!==id||result.deleted?.operationId!==operationId||result.records[tipo].some((row:Record<string,unknown>)=>String(row.id)===id))throw new Error("Confirmación de eliminación incompleta.");
+   const snapshot=await acceptSnapshot(result.records);
+   window.dispatchEvent(new Event("explosivos-sync-progress"));
+   return snapshot;
+  }catch(error){
+   if(error instanceof ApiRejection)throw error;
+   throw new Error("No se pudo confirmar el resultado de la eliminación. Pulsa SINCRONIZAR para comprobar si el material sigue en el inventario. No se guardó una eliminación pendiente ni se reintentará automáticamente.");
+  }
+ });
+}
 export const pendingOperations=async()=> (await getOperations()).length;
 export async function listUsers(){return (await request("usersList")).users;}export async function createUser(usuario:string,nombre:string,password:string,rol:string){return request("userCreate",{usuario,nombre,password,rol});}export async function resetUserPassword(usuario:string,password:string){return request("userResetPassword",{usuario,password});}export async function setUserActive(usuario:string,activo:boolean){return request("userSetActive",{usuario,activo});}
 

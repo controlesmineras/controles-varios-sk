@@ -37,6 +37,7 @@ function doPost(e) {
     if (action === "verifyBatch") return json_(verifyBatch_(body, user.usuario, body.operationId));
     if (action === "move") return json_(move_(body, user.usuario, body.operationId));
     if (action === "deleteRecord") return json_(deleteRecord_(body, user, body.operationId));
+    if (action === "deleteRecordConfirmed") return json_(deleteRecordConfirmed_(body));
     if (action === "deletedRecordsList") return json_(deletedRecordsList_(user));
     if (action === "restoreRecord") return json_(restoreRecord_(body,user,body.operationId));
     if (action === "revertMovement") return json_(revertMovement_(body,user,body.operationId));
@@ -76,7 +77,7 @@ function save_(db) {
 function status_(token) {
   const db = load_(); let current = null;
   try { current = sessionFromDb_(db, token); } catch (_) {}
-  return { ok: true, apiVersion: 8, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
+  return { ok: true, apiVersion: 9, needsBootstrap: db.users.length === 0, authenticated: Boolean(current), usuario: current };
 }
 
 // One durable commit per batch, with a receipt for every operation (SK/Plaza model).
@@ -112,7 +113,7 @@ function sync_(operations,user,protocol) {
         keys.forEach(function(key){blocked.add(key);});
       }
     });
-    return {ok:true,apiVersion:8,syncProtocol:"explosivos-receipts-v1",processed:processed,rejected:rejected,records:publicRecords_(db)};
+    return {ok:true,apiVersion:9,syncProtocol:"explosivos-receipts-v1",processed:processed,rejected:rejected,records:publicRecords_(db)};
   });
 }
 function legacySync_(operations,user) {
@@ -208,6 +209,7 @@ function create_(r,usuario,operationId,batchDb) {
         Object.assign(item,{sealSchema:2,fechaNovedad:fecha,hora:r.hora,funcionarioSeguridad:funcionario,asistentes:asistentes});
       }
     }
+    ensureNotPermanentlyDeleted_(db,type,item.id);
     db.records[type].unshift(item); markOperation_(db,operationId); return {ok:true,id:item.id};
   });
 }
@@ -226,6 +228,7 @@ function createBatch_(r,usuario,operationId,batchDb) {
     });
     const existentes={}; db.records[type].forEach(function(item){existentes[item.serial]=true;}); const repetido=seriales.find(function(serial){return existentes[serial];}); if(repetido!==undefined)throw new Error("El serial "+repetido+" ya existe y no se guardó ningún registro.");
     const fechaRegistro=iso_(); const lote=r.loteIngreso||Utilities.getUuid(); const bySerial={};(r.items||[]).forEach(function(x){bySerial[x.serial]=x;});const items=seriales.map(function(serial){const source=bySerial[serial]||{};return Object.assign({id:source.id||Utilities.getUuid(),fechaRegistro:source.fechaRegistro||fechaRegistro,usuario:usuario,serial:serial,fechaFabricacion:fabricacion,fechaVencimiento:vencimiento,verificado:source.verificado===true,movimientos:[],loteIngreso:lote},common);});
+    items.forEach(function(item){ensureNotPermanentlyDeleted_(db,type,item.id);});
     db.records[type]=items.concat(db.records[type]); markOperation_(db,operationId); return {ok:true,cantidad:items.length,loteIngreso:lote};
   });
 }
@@ -253,10 +256,54 @@ function move_(body,usuario,operationId,batchDb) {
   });
 }
 
-// Deletion is disabled on the server too, including requests from older clients.
+// Legacy/queued deletes stay disabled; only the online, password-confirmed route is allowed.
 function deleteRecord_(body,user,operationId,batchDb) {
   requireAdmin_(user);
   throw new Error("La eliminación de seriales está deshabilitada. Usa Revertir / recuperar.");
+}
+
+// Compare exactly the record reviewed by the administrator, ignoring only the
+// client-side material tag and object key order. Arrays retain their order.
+function deletionSnapshot_(record) {
+  function ordered(value) {
+    if(Array.isArray(value))return value.map(ordered);
+    if(value&&typeof value==="object")return Object.keys(value).sort().reduce(function(out,key){out[key]=ordered(value[key]);return out;},{});
+    return value;
+  }
+  const copy=Object.assign({},record);delete copy.tipo;
+  return JSON.stringify(ordered(copy));
+}
+function ensureNotPermanentlyDeleted_(db,tipo,id) {
+  if((db.confirmedDeletions||[]).some(function(row){return row.tipo===tipo&&row.id===String(id);}))throw new Error("Este registro fue eliminado definitivamente. Sincroniza y revisa el pendiente.");
+}
+function deleteRecordConfirmed_(body) {
+  return locked_(function(db){
+    // Recheck the live session/role/password inside the same lock as the delete.
+    const user=sessionFromDb_(db,body.token);requireAdmin_(user);
+    const account=db.users.find(function(row){return row.usuario===user.usuario&&row.activo;});
+    const password=required_(body.password,"contraseña de acceso");
+    if(!account||account.hash!==hash_(account.salt+password))throw new Error("Contraseña incorrecta. No se eliminó el registro.");
+    if(body.confirmed!==true)throw new Error("Debes aceptar primero la advertencia de eliminación.");
+    const tipo=required_(body.tipo,"tipo"),id=required_(body.id,"registro"),operationId=required_(body.operationId,"operación");
+    if(["INDUGEL","ANFO","MECHA DE SEGURIDAD","DETONADORES"].indexOf(tipo)<0)throw new Error("Tipo de material no válido.");
+    const receipts=db.confirmedDeletions||[];
+    const previous=receipts.find(function(row){return row.operationId===operationId;});
+    if(previous){
+      if(previous.tipo!==tipo||previous.id!==id||previous.usuario!==user.usuario)throw new Error("La confirmación corresponde a otra eliminación.");
+      return {ok:true,repeated:true,deleted:{tipo:tipo,id:id,operationId:operationId},records:publicRecords_(db)};
+    }
+    if(operationDone_(db,operationId))throw new Error("El identificador de operación ya fue utilizado.");
+    const rows=db.records[tipo],index=rows.findIndex(function(row){return String(row.id)===id;});
+    if(index<0)throw new Error("El registro ya no existe. Sincroniza para actualizar el inventario.");
+    if(!body.expectedRecord||deletionSnapshot_(body.expectedRecord)!==deletionSnapshot_(rows[index]))throw new Error("El registro cambió. Sincroniza y revisa sus datos antes de eliminarlo.");
+    rows.splice(index,1);
+    // Remove any archived copy of this exact ID, not other items with the same serial.
+    db.deletedRecords=(db.deletedRecords||[]).filter(function(row){return !(row.tipo===tipo&&String(row.registro&&row.registro.id)===id);});
+    // Minimal receipt only: no serial, movement history or password is retained.
+    receipts.push({operationId:operationId,tipo:tipo,id:id,usuario:user.usuario,fecha:iso_()});db.confirmedDeletions=receipts;
+    markOperation_(db,operationId);
+    return {ok:true,deleted:{tipo:tipo,id:id,operationId:operationId},records:publicRecords_(db)};
+  });
 }
 
 function deletedRecordsList_(user) {
