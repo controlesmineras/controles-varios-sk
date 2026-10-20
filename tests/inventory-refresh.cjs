@@ -54,30 +54,30 @@ function harness() {
 }
 const tests = [], test = (name, run) => tests.push({name, run});
 test('guardar un traslado refresca Indugel aunque otra sincronización siga esperando', async () => {
-  const h = harness(); await h.settle(); assert.deepEqual(h.counts(), ['1', '0']); assert.equal(h.calls, 1);
+  const h = harness(); await h.settle(); assert.deepEqual(h.counts(), ['1', '1']); assert.equal(h.calls, 1);
   h.save(interior); await h.onSaved(); await h.settle();
-  assert.deepEqual(h.counts(), ['1', '1'], 'La tarjeta debe reflejar el traslado guardado, sin esperar la red');
-  h.card().props.onClick(); h.render(); assert.deepEqual(h.counts(), ['154', '154'], 'Las barras usan la ubicación nueva');
+  assert.deepEqual(h.counts(), ['1', '0'], 'La tarjeta debe reflejar el traslado guardado, sin esperar la red');
+  h.card().props.onClick(); h.render(); assert.deepEqual(h.counts(), ['154', '0'], 'Las barras usan la ubicación nueva');
 });
 test('el progreso de un lote refresca existencias y no solo el contador de pendientes', async () => {
   const h = harness(); await h.settle(); h.save(interior);
   h.window.dispatchEvent(new Event('explosivos-sync-progress')); await h.settle();
-  assert.deepEqual(h.counts(), ['1', '1']); assert.equal(h.calls, 1, 'Refrescar la tarjeta no debe crear otra petición de red');
+  assert.deepEqual(h.counts(), ['1', '0']); assert.equal(h.calls, 1, 'Refrescar la tarjeta no debe crear otra petición de red');
 });
-test('una respuesta anterior no devuelve la tarjeta a almacén y el guardado solicitado se sincroniza después', async () => {
+test('una respuesta anterior no devuelve el material al almacén y el guardado solicitado se sincroniza después', async () => {
   const h = harness(); await h.settle(); h.save(interior); await h.onSaved();
   let followups = 0;
   h.setSync(async () => { followups++; h.save(interior, 0); return { records: inventory(interior), pending: 0, issues: [] }; });
   h.finish(); await h.settle();
-  assert.deepEqual(h.counts(), ['1', '1']); assert.equal(followups, 1, 'No perder la sincronización pedida mientras estaba ocupada');
+  assert.deepEqual(h.counts(), ['1', '0']); assert.equal(followups, 1, 'No perder la sincronización pedida mientras estaba ocupada');
 });
 test('sin conexión, el guardado actualiza las cifras sin hacer solicitudes nuevas', async () => {
   const h = harness(); await h.settle(); h.finish(); await h.settle(); const calls = h.calls;
   h.navigator.onLine = false; h.save(interior); await h.onSaved(); await h.settle();
-  assert.deepEqual(h.counts(), ['1', '1']); assert.equal(h.calls, calls);
+  assert.deepEqual(h.counts(), ['1', '0']); assert.equal(h.calls, calls);
 });
 test('un cambio de sesión descarta la actualización de la respuesta anterior', async () => {
   const h = harness(); await h.settle(); h.save(interior); h.local.delete('control_explosivos_token'); h.finish(); await h.settle();
-  assert.deepEqual(h.counts(), ['1', '0']);
+  assert.deepEqual(h.counts(), ['1', '1']);
 });
 (async () => { for (const {name, run} of tests) { await run(); console.log('PASS:', name); } console.log(`${tests.length} pruebas de actualización visual superadas; sin datos reales.`); })().catch(error => { console.error(error); process.exitCode = 1; });

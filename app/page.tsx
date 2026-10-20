@@ -214,7 +214,7 @@ export default function Home() {
     }, { signal: lifecycle.signal })).catch(() => undefined);
     return () => lifecycle.abort();
   }, [records]);
-  const selectedLocation = materialLocations[selected] || "interior";
+  const selectedLocation = materialLocations[selected] || "surface";
   const selectedLocationLabel = selectedLocation === "all" ? "Todos los lugares" : selectedLocation === "interior" ? "Polvorín" : "Almacén";
   const selectedLocationValue = selectedLocation === "interior" ? "Polvorín interior de mina" : "Polvorín superficie";
   const selectedRecords = useMemo(
@@ -298,7 +298,7 @@ export default function Home() {
             const interior=available.filter(record=>record.ubicacion==="Polvorín interior de mina").length;
             const surface=available.filter(record=>record.ubicacion==="Polvorín superficie").length;
             const view=materialViews[name]||0;
-            const location=materialLocations[name]||"interior";
+            const location=materialLocations[name]||"surface";
             const locationCount=location==="all"?available.length:location==="interior"?interior:surface;
             return (
             <div key={name} className={`relative rounded-2xl border bg-white p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md ${selected === name ? "border-[#f5b51b] ring-2 ring-[#f5b51b]/20" : "border-slate-200"}`}>
