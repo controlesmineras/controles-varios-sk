@@ -317,7 +317,7 @@ export default function Home() {
               <div className="mt-4 rounded-xl border-2 border-[#0d2c3e]/20 bg-slate-100 p-1.5">
                 <p className="mb-1.5 text-center text-[10px] font-bold uppercase tracking-widest text-[#0d2c3e]">UBICACIÓN</p>
                 <div className="grid grid-cols-3 gap-1" role="group" aria-label={`Ubicación para ${name}`}>
-                  {([{value:"all",label:"TODOS"},{value:"interior",label:"POLVORÍN"},{value:"surface",label:"ALMACÉN"}] as const).map(option=><button key={option.value} type="button" aria-pressed={location===option.value} onClick={()=>{setSelected(name);setMaterialLocations(current=>({...current,[name]:option.value}));}} className={`min-h-11 rounded-lg px-1 py-2 text-[10px] font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${location===option.value?"bg-[#0d2c3e] text-white shadow-md ring-2 ring-[#f5b51b]":"bg-white text-[#0d2c3e] hover:bg-slate-200"}`}>{option.label}</button>)}
+                  {([{value:"all",label:"TODOS"},{value:"surface",label:"ALMACÉN"},{value:"interior",label:"POLVORÍN"}] as const).map(option=><button key={option.value} type="button" aria-pressed={location===option.value} onClick={()=>{setSelected(name);setMaterialLocations(current=>({...current,[name]:option.value}));}} className={`min-h-11 rounded-lg px-1 py-2 text-[10px] font-bold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${location===option.value?"bg-[#0d2c3e] text-white shadow-md ring-2 ring-[#f5b51b]":"bg-white text-[#0d2c3e] hover:bg-slate-200"}`}>{option.label}</button>)}
                 </div>
               </div>
             </div>
@@ -377,7 +377,7 @@ export default function Home() {
                       <p><b>Buscar:</b> encuentra registros por serial, número de caja o lote.</p>
                       <p><b>Orden:</b> organiza los registros por ingreso, traslado, vencimiento o serial, sin ocultarlos. El segundo criterio resuelve los empates del primero.</p><p><b>Fecha exacta:</b> elige si deseas filtrar por ingreso, traslado o vencimiento y selecciona el día. Si queda vacía, muestra todas las fechas. En precintos filtra la fecha de la novedad.</p>
                       <p><b>Todos / Verificados / Pendientes:</b> muestra todos los registros o solo los que ya fueron verificados o están pendientes de verificación de ingreso.</p>
-                      <p>Los filtros se aplican al material y al lugar seleccionados en las tarjetas de arriba: TODOS, Polvorín o Almacén. TODOS reúne los registros de ambos lugares.</p>
+                      <p>Los filtros se aplican al material y al lugar seleccionados en las tarjetas de arriba: TODOS, Almacén o Polvorín. TODOS reúne los registros de ambos lugares.</p>
                     </div>
                   </DialogContent>
                 </Dialog>
