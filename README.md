@@ -32,6 +32,8 @@ Las marcas finalizadas se guardan en este dispositivo y usuario mediante Indexed
 
 Los cambios de inventario se guardan primero en el dispositivo. Solo se retiran de pendientes con una confirmación válida del servidor. Los IDs de operación se conservan al reintentar, incluso si la respuesta se perdió después de guardar en el servidor.
 
+Las cifras de las tarjetas y la lista se refrescan desde el guardado local aunque haya una sincronización en curso. Cada lote confirmado refresca también el inventario visible. Una solicitud de actualización recibida mientras la red está ocupada se atiende al terminar; no se descarta. Las respuestas anteriores no reemplazan un guardado local más reciente y actualizar las cifras no presenta un pendiente como sincronizado. Esta corrección de pantalla no requiere modificar `Code.gs`.
+
 Una sincronización recoge también los cambios añadidos durante el envío, hasta tres rondas por ejecución para no quedarse en un ciclo infinito. Si quedan cambios nuevos sin rechazos, continúa automáticamente. Ante errores de conexión, tiempos de espera o respuestas HTTP temporales, los pendientes se reintentan tras 5, 10, 20, 40 y hasta 60 segundos mientras la app esté visible y conectada. Volver a tener conexión también permite reintentar; siempre está disponible SINCRONIZAR.
 
 Los errores de permisos, sesión, datos o confirmaciones inválidas conservan los pendientes y requieren revisión; no disparan reintentos automáticos continuos. No se amplían permisos ni se borran pendientes para ocultar errores. Las revistas son locales y no forman parte de esta cola.
@@ -53,6 +55,7 @@ node tests/device-access.cjs
 node tests/offline-session.cjs
 node tests/synchronization.cjs
 node tests/revista-order.cjs
+node tests/inventory-refresh.cjs
 ```
 
 

@@ -93,42 +93,67 @@ export default function Home() {
   const [records, setRecords] = useState<Record<string, Array<Record<string, unknown>>>>({});
   const [retryDelay,setRetryDelay]=useState(0);
   const retryCount=useRef(0), loadingRecords=useRef(false);
-  const loadRecords = useCallback(async () => {
-    if(loadingRecords.current)return false;
+  const refreshRequested=useRef<string|null>(null), localRead=useRef(0);
+  const refreshLocalRecords=useCallback(async(expectedToken?:string)=>{
+    const token=expectedToken||localStorage.getItem("control_explosivos_token");
+    if(!token)return null;
+    const read=++localRead.current;
+    const [cached,pending]=await Promise.all([listRecords(),pendingOperations()]);
+    if(read!==localRead.current||localStorage.getItem("control_explosivos_token")!==token)return null;
+    setRecords(cached);setPendingSync(pending);
+    return {records:cached,pending};
+  },[]);
+  const loadRecords = useCallback(async ():Promise<boolean> => {
     const sessionToken=localStorage.getItem("control_explosivos_token");
     if(!sessionToken)return false;
     const current=()=>localStorage.getItem("control_explosivos_token")===sessionToken;
+    if(loadingRecords.current){
+      // A save must repaint immediately, even while a previous network call waits.
+      refreshRequested.current=sessionToken;
+      try{await refreshLocalRecords(sessionToken);}catch(cause){if(current())setSyncError(cause instanceof Error?cause.message:"No se pudo actualizar el inventario local.");}
+      return false;
+    }
     loadingRecords.current=true;
+    refreshRequested.current=null;
     setRetryDelay(0);setSyncState("syncing");setSyncError("");setSyncIssues([]);
     const showSavedSync=async()=>{const stamp=await getLocal<string>("lastSync","");if(stamp&&current())setLastSync(new Date(stamp).toLocaleString("es-CO",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}));};
     try {
-      const cached=await listRecords(),pending=await pendingOperations();
+      await refreshLocalRecords(sessionToken);
       if(!current())return false;
-      setRecords(cached);setPendingSync(pending);await showSavedSync();
+      await showSavedSync();
       if(!navigator.onLine){setSyncState("idle");setSyncError("Sin conexión. Los pendientes siguen guardados en este dispositivo.");return false;}
       const result=await synchronize();
       if(!current())return false;
-      setRecords(result.records);setPendingSync(result.pending);setSyncIssues(result.issues);await showSavedSync();
+      // A new local save may have committed after the sync result was captured.
+      const latest=await refreshLocalRecords(sessionToken);
+      const pending=latest?.pending??await pendingOperations();
+      if(!current())return false;
+      setSyncIssues(result.issues);await showSavedSync();
       retryCount.current=0;
-      setSyncState(result.pending||result.issues.length?"error":"success");
-      if(result.pending){
-        setSyncError(`${result.pending} operación(es) pendiente(s). ${result.issues.length?"Revisa los motivos indicados abajo.":"Se enviarán automáticamente los cambios nuevos."}`);
+      setSyncState(pending||result.issues.length?"error":"success");
+      if(pending){
+        setSyncError(`${pending} operación(es) pendiente(s). ${result.issues.length?"Revisa los motivos indicados abajo.":"Se enviarán automáticamente los cambios nuevos."}`);
         if(!result.issues.length)setRetryDelay(1000);
       }
-      if(!result.pending&&result.issues.length)setSyncError("Algunas correcciones no se aplicaron. Revisa los motivos indicados abajo.");
-      return result.pending===0&&result.issues.length===0;
+      if(!pending&&result.issues.length)setSyncError("Algunas correcciones no se aplicaron. Revisa los motivos indicados abajo.");
+      return pending===0&&result.issues.length===0;
     } catch(cause) {
       if(!current())return false;
       setSyncError(cause instanceof Error?cause.message:"No se pudo sincronizar. Los pendientes se conservan.");setSyncState("error");
       try{
-        const cached=await listRecords(),pending=await pendingOperations();
+        const latest=await refreshLocalRecords(sessionToken);
+        const pending=latest?.pending??await pendingOperations();
         if(!current())return false;
-        setRecords(cached);setPendingSync(pending);await showSavedSync();
+        await showSavedSync();
         if(pending&&isTransientSyncError(cause))setRetryDelay(Math.min(60000,5000*2**Math.min(retryCount.current++,4)));
       }catch{}
       return false;
-    } finally { loadingRecords.current=false; }
-  }, []);
+    } finally {
+      loadingRecords.current=false;
+      const requested=refreshRequested.current;refreshRequested.current=null;
+      if(requested&&localStorage.getItem("control_explosivos_token")===requested)void loadRecords();
+    }
+  }, [refreshLocalRecords]);
   async function resolvePerson(issue:SyncIssue){
     if(resolvingPerson)return;
     setResolvingPerson(issue.id);setPersonResolutionError("");setPersonResolutionNotice("");
@@ -153,10 +178,10 @@ export default function Home() {
     return()=>{clearTimeout(timer);document.removeEventListener("visibilitychange",schedule);};
   },[authenticated,retryDelay,loadRecords]);
   useEffect(()=>{
-    const progress=()=>{void pendingOperations().then(setPendingSync);};
+    const progress=()=>{void refreshLocalRecords().catch(()=>undefined);};
     window.addEventListener("explosivos-sync-progress",progress);
     return()=>window.removeEventListener("explosivos-sync-progress",progress);
-  },[]);
+  },[refreshLocalRecords]);
   useEffect(() => {
     if (!backendConfigured()) { setChecking(false); return; }
     getStatus().then((status) => {

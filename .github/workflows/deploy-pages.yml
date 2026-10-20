@@ -27,7 +27,7 @@ jobs:
           node-version: 22
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: node tests/device-access.cjs && node tests/offline-session.cjs && node tests/synchronization.cjs && node tests/revista-order.cjs
+      - run: node tests/device-access.cjs && node tests/offline-session.cjs && node tests/synchronization.cjs && node tests/revista-order.cjs && node tests/inventory-refresh.cjs
       - run: pnpm exec next build
       - run: node scripts/build-offline-shell.mjs
       - uses: actions/configure-pages@v5
