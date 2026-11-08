@@ -6,15 +6,15 @@ import { OfflineShell } from "@/components/offline-shell";
 export const metadata: Metadata = {
   title: "CONTROL EXPLOSIVOS SK",
   description: "Control de inventario, ubicación y sellos de seguridad.",
-  manifest: "/controles-varios-sk/manifest.webmanifest?v=20261007-2",
+  manifest: "/controles-varios-sk/manifest.webmanifest?v=marca-sk-1",
   appleWebApp: { capable: true, statusBarStyle: "black-translucent", title: "EXPLOSIVOS SK" },
   other: {
     "codex-preview": "development",
   },
   icons: {
-    icon: "/controles-varios-sk/logo-mecha-32.png?v=20261007-2",
-    shortcut: "/controles-varios-sk/logo-mecha-32.png?v=20261007-2",
-    apple: "/controles-varios-sk/logo-mecha-192.png?v=20261007-2",
+    icon: "/controles-varios-sk/sk-explosivos-marca-192.png",
+    shortcut: "/controles-varios-sk/sk-explosivos-marca-192.png",
+    apple: "/controles-varios-sk/sk-explosivos-marca-192.png",
   },
 };
 
